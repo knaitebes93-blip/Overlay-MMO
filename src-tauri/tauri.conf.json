@@ -29,6 +29,11 @@
       "csp": null
     }
   },
+  "plugins": {
+    "sql": {
+      "preload": ["sqlite:overlay.db"]
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis", "app"]

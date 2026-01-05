@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/v2/plugins/workspace/crates/tauri-utils/schema/capability.json",
+  "identifier": "default",
+  "description": "Default permissions for Overlay MMO",
+  "windows": ["*"],
+  "permissions": [
+    "app:default",
+    "core:default",
+    "window:default",
+    "fs:default",
+    "path:default",
+    "sql:default",
+    "sql:allow-select",
+    "sql:allow-execute"
+  ]
+}
