@@ -32,8 +32,48 @@ jobs:
       - name: Build Tauri app
         run: npm run tauri build
 
-      - name: Upload build artifacts
+      - name: Prepare portable bundle
+        shell: pwsh
+        run: |
+          $portableRoot = "src-tauri/target/release/bundle/app"
+          if (-not (Test-Path $portableRoot)) {
+            Write-Error "Portable bundle root not found at $portableRoot"
+          }
+
+          $exePath = Get-ChildItem -Path $portableRoot -Recurse -Filter "overlay-mmo.exe" | Select-Object -First 1
+
+          if (-not $exePath) {
+            Write-Error "Portable executable not found under $portableRoot"
+          }
+
+          $portableDir = Split-Path $exePath.FullName -Parent
+          Write-Host "Portable directory detected at: $portableDir"
+          Get-ChildItem $portableDir
+
+          $zipPath = "src-tauri/target/release/bundle/overlay-mmo-portable-win-x64.zip"
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath
+          }
+
+          $portableContent = Join-Path $portableDir '*'
+          Compress-Archive -Path $portableContent -DestinationPath $zipPath
+
+          if (-not (Test-Path $zipPath)) {
+            Write-Error "Portable zip was not created at $zipPath"
+          }
+
+          Get-ChildItem (Split-Path $zipPath -Parent)
+
+      - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
-          name: windows-bundle
-          path: src-tauri/target/release/bundle/**/*
+          name: overlay-mmo-installer-win-x64
+          path: src-tauri/target/release/bundle/nsis/**/*
+          if-no-files-found: error
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlay-mmo-portable-win-x64
+          path: src-tauri/target/release/bundle/overlay-mmo-portable-win-x64.zip
+          if-no-files-found: error
