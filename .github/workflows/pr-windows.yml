@@ -29,6 +29,36 @@ jobs:
             npm install --no-audit --no-fund
           }
 
+      - name: Install ImageMagick
+        run: choco install --no-progress imagemagick
+
+      - name: Prepare Windows icon
+        shell: pwsh
+        run: |
+          $projectRoot = Resolve-Path .
+          $iconsDir = Join-Path $projectRoot "src-tauri/icons"
+          if (-not (Test-Path $iconsDir)) {
+            New-Item -ItemType Directory -Path $iconsDir | Out-Null
+          }
+
+          $iconIco = Join-Path $iconsDir "icon.ico"
+          $preferredPng = Join-Path $iconsDir "icon.png"
+
+          if (-not (Test-Path $preferredPng)) {
+            $existingPng = Get-ChildItem -Path $projectRoot -Filter *.png -Recurse | Select-Object -First 1
+            if ($existingPng) {
+              Copy-Item $existingPng.FullName $preferredPng -Force
+            }
+          }
+
+          if (-not (Test-Path $preferredPng)) {
+            $placeholder = Join-Path $iconsDir "placeholder.png"
+            magick -size 512x512 xc:"#1E1E2E" -gravity center -pointsize 120 -fill white -font Arial label:"MMO" $placeholder
+            $preferredPng = $placeholder
+          }
+
+          magick $preferredPng -define icon:auto-resize="256,48,32,16" $iconIco
+
       - name: Build Tauri app
         run: npm run tauri build
 
