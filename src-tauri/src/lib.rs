@@ -77,8 +77,7 @@ pub fn run() {
                           ended_at INTEGER,
                           duration_seconds INTEGER
                         );
-                        "#
-                        .to_string(),
+                        "#,
                         kind: MigrationKind::Up,
                     }],
                 )

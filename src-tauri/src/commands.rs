@@ -1,6 +1,6 @@
 use std::fs;
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use crate::{profiles_dir, MonitorInfo, ProfileData};
 
