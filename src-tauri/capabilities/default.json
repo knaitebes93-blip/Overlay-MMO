@@ -4,7 +4,7 @@
   "description": "Default permissions for Overlay MMO",
   "windows": ["*"],
   "permissions": [
-    "app:default",
+    "core:app:default",
     "core:default",
     "window:default",
     "fs:default",
