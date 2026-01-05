@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import { LogicalPosition, LogicalSize } from '@tauri-apps/api/dpi';
-import { appWindow, WebviewWindow } from '@tauri-apps/api/window';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { Rnd } from 'react-rnd';
 import { ClockWidget } from './components/ClockWidget';
 import { StatusWidget } from './components/StatusWidget';
@@ -53,6 +54,7 @@ function OverlayView() {
   const [profileName, setProfileName] = useState('example');
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [mode, setMode] = useState<OverlayMode>('edit');
+  const appWindow = getCurrentWindow();
 
   const selectedMonitor = useMemo(() =>
     monitors.find((m) => m.id === profile?.selectedMonitorId),
