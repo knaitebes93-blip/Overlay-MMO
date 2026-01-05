@@ -28,7 +28,8 @@
       "csp": null
     }
   },
-  "bundle": {
-    "active": false
+    "bundle": {
+    "active": true,
+    "targets": ["nsis"]
   }
 }
