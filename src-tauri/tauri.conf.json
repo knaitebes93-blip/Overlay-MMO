@@ -1,0 +1,34 @@
+{
+  "productName": "Overlay MMO",
+  "version": "0.1.0",
+  "identifier": "com.overlay.mmo",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "overlay",
+        "title": "Overlay",
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "focus": true,
+        "width": 800,
+        "height": 600,
+        "shadow": false,
+        "center": true,
+        "visible": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": false
+  }
+}
