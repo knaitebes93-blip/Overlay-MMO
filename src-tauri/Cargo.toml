@@ -1,0 +1,17 @@
+[package]
+name = "overlay-mmo"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "overlay_mmo"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+tauri = { version = "2.0.0", features = ["macos-private-api"] }
+
+[build-dependencies]
+ tauri-build = { version = "2.0.0", features = [] }
