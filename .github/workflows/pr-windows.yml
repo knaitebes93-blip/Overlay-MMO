@@ -33,13 +33,19 @@ jobs:
             ${{ runner.os }}-cargo-
 
       - name: Install dependencies
+        shell: pwsh
         run: |
-          if (Test-Path 'package-lock.json') {
-            npm ci
+          if (Test-Path "package-lock.json") {
+            try {
+              npm ci
+            }
+            catch {
+              Write-Warning "npm ci failed; falling back to npm install"
+              npm install
+            }
           }
           else {
-            Write-Host 'package-lock.json not found; running npm install'
-            npm install --no-audit --no-fund
+            npm install
           }
 
       - name: Build Tauri app
