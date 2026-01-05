@@ -36,16 +36,16 @@ jobs:
         shell: pwsh
         run: |
           if (Test-Path "package-lock.json") {
-            try {
-              npm ci
-            }
-            catch {
-              Write-Warning "npm ci failed; falling back to npm install"
+            npm ci
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "npm ci failed (lockfile out of sync). Falling back to npm install."
               npm install
+              if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
             }
           }
           else {
             npm install
+            if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
           }
 
       - name: Build Tauri app
