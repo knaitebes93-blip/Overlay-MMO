@@ -1,9 +1,10 @@
-import { Database } from '@tauri-apps/plugin-sql';
+import { getTauriSql, TauriSqlDatabase } from './tauriSql';
 
-let dbPromise: Promise<Database> | null = null;
+let dbPromise: Promise<TauriSqlDatabase> | null = null;
 
-export async function getDatabase(): Promise<Database> {
+export async function getDatabase(): Promise<TauriSqlDatabase> {
   if (!dbPromise) {
+    const Database = getTauriSql();
     dbPromise = Database.load('sqlite:overlay.db');
   }
   return dbPromise;
