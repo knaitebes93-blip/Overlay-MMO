@@ -14,10 +14,23 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 'lts/*'
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 'package-lock.json'
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\.cargo\registry
+            ~\.cargo\git
+            src-tauri\target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Install dependencies
         run: |
@@ -32,8 +45,83 @@ jobs:
       - name: Build Tauri app
         run: npm run tauri build
 
-      - name: Upload build artifacts
+      - name: Debug build outputs (non-blocking)
+        shell: pwsh
+        continue-on-error: true
+        run: |
+          $releasePath = "src-tauri/target/release"
+          $bundlePath = "src-tauri/target/release/bundle"
+
+          Write-Host "Checking $releasePath";
+          if (Test-Path $releasePath) { Get-ChildItem -Path $releasePath -Force -ErrorAction SilentlyContinue }
+          else { Write-Host "$releasePath not found" }
+
+          Write-Host "Checking $bundlePath";
+          if (Test-Path $bundlePath) { Get-ChildItem -Path $bundlePath -Force -ErrorAction SilentlyContinue }
+          else { Write-Host "$bundlePath not found" }
+
+      - name: Create portable zip
+        shell: pwsh
+        run: |
+          $releaseDir = "src-tauri/target/release"
+          $portableDir = "src-tauri/target/portable/overlay-mmo"
+
+          New-Item -ItemType Directory -Force -Path $portableDir | Out-Null
+
+          $exeCandidates = Get-ChildItem -Path $releaseDir -Filter *.exe -File -ErrorAction SilentlyContinue
+          $filteredCandidates = $exeCandidates | Where-Object { $_.Name -notmatch 'installer|setup' }
+
+          if (-not $filteredCandidates) {
+            $filteredCandidates = $exeCandidates
+          }
+
+          if (-not $filteredCandidates) {
+            Write-Error "No executable found directly under $releaseDir"
+          }
+
+          if ($filteredCandidates.Count -gt 1) {
+            $selectedExe = $filteredCandidates | Sort-Object Length -Descending | Select-Object -First 1
+          }
+          else {
+            $selectedExe = $filteredCandidates | Select-Object -First 1
+          }
+
+          Write-Host "Selected executable: $($selectedExe.Name) ($([math]::Round($selectedExe.Length / 1KB, 2)) KB)"
+
+          Copy-Item -Path $selectedExe.FullName -Destination $portableDir -Force
+
+          $sidecarPatterns = @('*.dll', '*.json', '*.dat', '*.bin')
+          foreach ($pattern in $sidecarPatterns) {
+            $sidecars = Get-ChildItem -Path $releaseDir -Filter $pattern -File -ErrorAction SilentlyContinue
+            foreach ($file in $sidecars) {
+              Copy-Item -Path $file.FullName -Destination $portableDir -Force
+            }
+          }
+
+          Write-Host "Portable directory contents:"
+          Get-ChildItem -Path $portableDir -Force
+
+          $zipPath = "src-tauri/target/portable/overlay-mmo-portable-win-x64.zip"
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+
+          Compress-Archive -Path "$portableDir\*" -DestinationPath $zipPath
+
+          if (-not (Test-Path $zipPath)) {
+            Write-Error "Portable zip was not created at $zipPath"
+          }
+
+      - name: Upload NSIS installer
         uses: actions/upload-artifact@v4
         with:
-          name: windows-bundle
-          path: src-tauri/target/release/bundle/**/*
+          name: overlay-mmo-installer-win-x64
+          path: src-tauri/target/release/bundle/nsis/**/*
+          if-no-files-found: error
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: overlay-mmo-portable-win-x64
+          path: src-tauri/target/portable/overlay-mmo-portable-win-x64.zip
+          if-no-files-found: error
