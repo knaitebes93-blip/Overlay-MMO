@@ -1,5 +1,3 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 use serde::{Deserialize, Serialize};
 use std::{fs, path::PathBuf};
 use tauri::{AppHandle, Manager};
@@ -48,9 +46,7 @@ pub fn list_monitors(app: AppHandle) -> Result<Vec<MonitorInfo>, String> {
         .into_iter()
         .enumerate()
         .map(|(idx, monitor)| MonitorInfo {
-            id: monitor
-                .name()
-                .unwrap_or_else(|| format!("monitor-{idx}")),
+            id: monitor.name().unwrap_or_else(|| format!("monitor-{idx}")),
             name: monitor.name(),
             x: monitor.position().x,
             y: monitor.position().y,
@@ -70,12 +66,18 @@ pub fn read_profile(app: AppHandle, profile_name: String) -> Result<ProfileData,
 }
 
 #[tauri::command]
-pub fn write_profile(app: AppHandle, profile_name: String, data: ProfileData) -> Result<(), String> {
+pub fn write_profile(
+    app: AppHandle,
+    profile_name: String,
+    data: ProfileData,
+) -> Result<(), String> {
     let dir = profiles_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create profile directory: {e}"))?;
     let path = dir.join(format!("{profile_name}.json"));
-    let contents = serde_json::to_string_pretty(&data).map_err(|e| format!("failed to serialize profile: {e}"))?;
-    fs::write(&path, contents).map_err(|e| format!("failed to write profile {}: {e}", path.display()))
+    let contents = serde_json::to_string_pretty(&data)
+        .map_err(|e| format!("failed to serialize profile: {e}"))?;
+    fs::write(&path, contents)
+        .map_err(|e| format!("failed to write profile {}: {e}", path.display()))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
