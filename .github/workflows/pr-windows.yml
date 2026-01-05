@@ -15,8 +15,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: 'package-lock.json'
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -32,20 +30,39 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Reset npm cache (Windows)
+        shell: pwsh
+        run: |
+          Write-Host "Using fresh npm cache in RUNNER_TEMP to avoid corrupted global cache"
+          $cacheDir = Join-Path $env:RUNNER_TEMP "npm-cache"
+          New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+          npm config set cache "$cacheDir" --global
+          npm cache verify
+          npm cache clean --force
+
       - name: Install dependencies
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
+
+          function Run-Npm($cmd) {
+            Write-Host "Running: npm $cmd"
+            npm $cmd --no-audit --no-fund
+            return $LASTEXITCODE
+          }
+
           if (Test-Path "package-lock.json") {
-            npm ci
-            if ($LASTEXITCODE -ne 0) {
-              Write-Warning "npm ci failed (lockfile out of sync). Falling back to npm install."
-              npm install
-              if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+            $code = Run-Npm "ci"
+            if ($code -ne 0) {
+              Write-Warning "npm ci failed. Cleaning cache and retrying with npm install..."
+              npm cache clean --force
+              $code = Run-Npm "install"
+              if ($code -ne 0) { throw "npm install failed" }
             }
           }
           else {
-            npm install
-            if ($LASTEXITCODE -ne 0) { throw "npm install failed" }
+            $code = Run-Npm "install"
+            if ($code -ne 0) { throw "npm install failed" }
           }
 
       - name: Build Tauri app
