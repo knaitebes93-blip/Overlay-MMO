@@ -1,5 +1,6 @@
 {
   "productName": "Overlay MMO",
+  "mainBinaryName": "overlay-mmo",
   "version": "0.1.0",
   "identifier": "com.overlay.mmo",
   "build": {
@@ -30,7 +31,6 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
-    "mainBinaryName": "overlay-mmo"
+    "targets": ["nsis"]
   }
 }
