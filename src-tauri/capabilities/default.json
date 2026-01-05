@@ -6,9 +6,9 @@
   "permissions": [
     "core:app:default",
     "core:default",
-    "window:default",
-    "fs:default",
-    "path:default",
+    "core:window:default",
+    "core:fs:default",
+    "core:path:default",
     "sql:default",
     "sql:allow-select",
     "sql:allow-execute"
