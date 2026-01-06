@@ -20,6 +20,7 @@ tauri-plugin-sql = { version = "2.0.0", features = ["sqlite"] }
 uuid = { version = "1.9", features = ["v4"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+tokio = { version = "1", features = ["time"] }
 
 [build-dependencies]
 tauri-build = { version = "2.5.3", features = [] }
