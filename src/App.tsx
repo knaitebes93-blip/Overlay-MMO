@@ -9,6 +9,7 @@ import { ClockWidget } from './components/ClockWidget';
 import { StatusWidget } from './components/StatusWidget';
 import type { MonitorInfo, OverlayMode, ProfileData, WidgetRect, WidgetType } from './types';
 import { Phase1ManualData } from './components/Phase1ManualData';
+import { ExpTracker } from './components/ExpTracker';
 
 interface AppProps {
   windowLabel: string;
@@ -235,7 +236,7 @@ function SettingsView() {
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
   const [currentMonitorId, setCurrentMonitorId] = useState<string>('');
   const [mode, setMode] = useState<OverlayMode>('edit');
-  const [tab, setTab] = useState<'settings' | 'manual'>('settings');
+  const [tab, setTab] = useState<'settings' | 'manual' | 'exp'>('settings');
 
   useEffect(() => {
     invoke<MonitorInfo[]>('list_monitors').then(setMonitors).catch(console.error);
@@ -291,6 +292,13 @@ function SettingsView() {
           >
             Phase 1 / Manual Data
           </button>
+          <button
+            type="button"
+            className={tab === 'exp' ? 'active' : ''}
+            onClick={() => setTab('exp')}
+          >
+            EXP Tracker
+          </button>
         </div>
       </div>
       {tab === 'settings' ? (
@@ -326,9 +334,13 @@ function SettingsView() {
             </div>
           </div>
         </>
-      ) : (
+      ) : tab === 'manual' ? (
         <div className="settings-section">
           <Phase1ManualData />
+        </div>
+      ) : (
+        <div className="settings-section">
+          <ExpTracker />
         </div>
       )}
     </div>

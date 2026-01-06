@@ -353,3 +353,93 @@ button:hover {
   background: rgba(255, 99, 71, 0.1);
   border: 1px solid rgba(255, 99, 71, 0.4);
 }
+
+.exp-tracker {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.exp-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.exp-card {
+  background: #1b1c20;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #2a2b30;
+}
+
+.exp-card h3 {
+  margin-top: 0;
+}
+
+.exp-header p {
+  margin: 4px 0 0;
+  color: #aaa;
+}
+
+.form-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.form-row input,
+.form-row select,
+.form-row button {
+  flex: 1;
+}
+
+.full-width {
+  width: 100%;
+}
+
+.muted {
+  color: #9fa2b0;
+  font-size: 12px;
+}
+
+.sampler-row {
+  justify-content: space-between;
+}
+
+.pill {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+.pill-on {
+  background: #1f3c1f;
+  color: #7ee07e;
+}
+
+.pill-off {
+  background: #3c1f1f;
+  color: #e07e7e;
+}
+
+.exp-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.exp-table th,
+.exp-table td {
+  text-align: left;
+  padding: 8px;
+  border-bottom: 1px solid #2b2c33;
+}
+
+.table-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
