@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use tauri_plugin_sql::{Migration, MigrationKind};
 
 mod commands;
 
@@ -40,6 +41,48 @@ pub(crate) fn profiles_dir() -> PathBuf {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(
+            tauri_plugin_sql::Builder::default()
+                .add_migrations(
+                    "sqlite:overlay.db",
+                    vec![Migration {
+                        version: 1,
+                        description: "create tables",
+                        sql: r#"
+                        CREATE TABLE IF NOT EXISTS timers (
+                          id TEXT PRIMARY KEY,
+                          name TEXT NOT NULL,
+                          ends_at INTEGER NOT NULL,
+                          created_at INTEGER NOT NULL
+                        );
+                        CREATE TABLE IF NOT EXISTS counters (
+                          id TEXT PRIMARY KEY,
+                          name TEXT NOT NULL,
+                          value INTEGER NOT NULL,
+                          created_at INTEGER NOT NULL
+                        );
+                        CREATE TABLE IF NOT EXISTS notes (
+                          id TEXT PRIMARY KEY,
+                          content TEXT NOT NULL,
+                          created_at INTEGER NOT NULL
+                        );
+                        CREATE TABLE IF NOT EXISTS spot_sessions (
+                          id TEXT PRIMARY KEY,
+                          spot_name TEXT NOT NULL,
+                          character_level INTEGER NOT NULL,
+                          exp_start INTEGER NOT NULL,
+                          exp_end INTEGER,
+                          exp_to_next_level INTEGER,
+                          started_at INTEGER NOT NULL,
+                          ended_at INTEGER,
+                          duration_seconds INTEGER
+                        );
+                        "#,
+                        kind: MigrationKind::Up,
+                    }],
+                )
+                .build(),
+        )
         .invoke_handler(tauri::generate_handler![
             commands::list_monitors,
             commands::read_profile,

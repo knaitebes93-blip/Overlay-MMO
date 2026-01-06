@@ -8,6 +8,7 @@ import { Rnd } from 'react-rnd';
 import { ClockWidget } from './components/ClockWidget';
 import { StatusWidget } from './components/StatusWidget';
 import type { MonitorInfo, OverlayMode, ProfileData, WidgetRect, WidgetType } from './types';
+import { Phase1ManualData } from './components/Phase1ManualData';
 
 interface AppProps {
   windowLabel: string;
@@ -234,6 +235,7 @@ function SettingsView() {
   const [monitors, setMonitors] = useState<MonitorInfo[]>([]);
   const [currentMonitorId, setCurrentMonitorId] = useState<string>('');
   const [mode, setMode] = useState<OverlayMode>('edit');
+  const [tab, setTab] = useState<'settings' | 'manual'>('settings');
 
   useEffect(() => {
     invoke<MonitorInfo[]>('list_monitors').then(setMonitors).catch(console.error);
@@ -272,37 +274,63 @@ function SettingsView() {
 
   return (
     <div className="settings-root">
-      <h1>Overlay Settings</h1>
-      <div className="settings-section">
-        <h2>Monitors</h2>
-        <ul>
-          {monitors.map((monitor) => (
-            <li key={monitor.id} className={monitor.id === currentMonitorId ? 'selected' : ''}>
-              <div className="monitor-row">
-                <div>
-                  <strong>{monitor.name ?? 'Unnamed Monitor'}</strong> ({monitor.id})
-                </div>
-                <div>Bounds: x={monitor.x}, y={monitor.y}, w={monitor.width}, h={monitor.height}</div>
-              </div>
-              <button type="button" onClick={() => selectMonitor(monitor.id)}>Use this monitor</button>
-            </li>
-          ))}
-        </ul>
-      </div>
-      <div className="settings-section">
-        <h2>Profiles</h2>
-        <div className="profile-quick">
-          <button type="button" onClick={() => loadProfile('example')}>Load example</button>
+      <div className="settings-header">
+        <h1>Overlay Settings</h1>
+        <div className="tab-row">
+          <button
+            type="button"
+            className={tab === 'settings' ? 'active' : ''}
+            onClick={() => setTab('settings')}
+          >
+            Overlay
+          </button>
+          <button
+            type="button"
+            className={tab === 'manual' ? 'active' : ''}
+            onClick={() => setTab('manual')}
+          >
+            Phase 1 / Manual Data
+          </button>
         </div>
       </div>
-      <div className="settings-section">
-        <h2>Overlay Mode</h2>
-        <p>Current mode: {mode}</p>
-        <div className="mode-buttons">
-          <button type="button" onClick={() => enforceMode('edit')}>Switch to Edit</button>
-          <button type="button" onClick={() => enforceMode('run')}>Switch to Run</button>
+      {tab === 'settings' ? (
+        <>
+          <div className="settings-section">
+            <h2>Monitors</h2>
+            <ul>
+              {monitors.map((monitor) => (
+                <li key={monitor.id} className={monitor.id === currentMonitorId ? 'selected' : ''}>
+                  <div className="monitor-row">
+                    <div>
+                      <strong>{monitor.name ?? 'Unnamed Monitor'}</strong> ({monitor.id})
+                    </div>
+                    <div>Bounds: x={monitor.x}, y={monitor.y}, w={monitor.width}, h={monitor.height}</div>
+                  </div>
+                  <button type="button" onClick={() => selectMonitor(monitor.id)}>Use this monitor</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="settings-section">
+            <h2>Profiles</h2>
+            <div className="profile-quick">
+              <button type="button" onClick={() => loadProfile('example')}>Load example</button>
+            </div>
+          </div>
+          <div className="settings-section">
+            <h2>Overlay Mode</h2>
+            <p>Current mode: {mode}</p>
+            <div className="mode-buttons">
+              <button type="button" onClick={() => enforceMode('edit')}>Switch to Edit</button>
+              <button type="button" onClick={() => enforceMode('run')}>Switch to Run</button>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div className="settings-section">
+          <Phase1ManualData />
         </div>
-      </div>
+      )}
     </div>
   );
 }
