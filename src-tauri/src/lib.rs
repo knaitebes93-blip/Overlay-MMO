@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use tauri::Manager;
 use tauri_plugin_sql::{Migration, MigrationKind};
 
 mod commands;
@@ -42,7 +43,6 @@ pub struct ManualValues {
     pub exp_percent: f64,
 }
 
-#[derive(Clone)]
 pub struct SamplerHandle {
     pub stop_flag: Arc<std::sync::atomic::AtomicBool>,
     pub join_handle: tauri::async_runtime::JoinHandle<()>,

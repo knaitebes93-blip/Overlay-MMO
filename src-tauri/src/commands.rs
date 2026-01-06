@@ -2,9 +2,7 @@ use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
-
-use chrono::Utc;
+use tokio::time::{sleep, Duration};
 use rusqlite::{params, Connection, OptionalExtension};
 use tauri::{AppHandle, State};
 use uuid::Uuid;
@@ -372,7 +370,7 @@ pub async fn list_spot_rates(
     Ok(rates)
 }
 
-async fn record_sample_from_provider(app_state: AppState) {
+async fn record_sample_from_provider(app_state: &AppState) {
     let spot_id = { app_state.active_spot_id.lock().unwrap().clone() };
     let Some(spot_id) = spot_id else {
         return;
@@ -396,19 +394,19 @@ pub async fn start_sampler(state: State<'_, AppState>) -> Result<(), String> {
         return Ok(());
     }
     let stop_flag = Arc::new(AtomicBool::new(false));
-    let state_clone = state.clone();
+    let state_clone = state.inner().clone();
     let loop_flag = stop_flag.clone();
     let handle = tauri::async_runtime::spawn(async move {
         loop {
             if loop_flag.load(Ordering::Relaxed) {
                 break;
             }
-            record_sample_from_provider(state_clone.clone()).await;
+            record_sample_from_provider(&state_clone).await;
             let interval = state_clone
                 .sampling_interval_sec
                 .load(Ordering::SeqCst)
                 .max(1);
-            tauri::async_runtime::sleep(Duration::from_secs(interval)).await;
+            sleep(Duration::from_secs(interval)).await;
         }
     });
     *guard = Some(crate::SamplerHandle {
