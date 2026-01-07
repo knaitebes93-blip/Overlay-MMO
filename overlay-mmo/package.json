@@ -1,0 +1,35 @@
+{
+  "name": "overlay-mmo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Passive MMO overlay built with Electron, React, Vite, and TypeScript.",
+  "main": "dist/electron/main.js",
+  "type": "commonjs",
+  "scripts": {
+    "dev": "concurrently -k \"tsc -p tsconfig.electron.json -w\" \"vite\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron .\"",
+    "lint": "eslint . --ext .ts,.tsx",
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.renderer.json --noEmit",
+    "build": "tsc -p tsconfig.electron.json && vite build"
+  },
+  "dependencies": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "20.11.30",
+    "@types/react": "18.2.66",
+    "@types/react-dom": "18.2.22",
+    "@typescript-eslint/eslint-plugin": "7.4.0",
+    "@typescript-eslint/parser": "7.4.0",
+    "@vitejs/plugin-react": "4.2.1",
+    "concurrently": "8.2.2",
+    "cross-env": "7.0.3",
+    "electron": "28.2.0",
+    "eslint": "8.57.0",
+    "eslint-plugin-react-hooks": "4.6.0",
+    "typescript": "5.4.5",
+    "vite": "5.4.2",
+    "wait-on": "7.2.0"
+  }
+}

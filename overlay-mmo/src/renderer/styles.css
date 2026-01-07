@@ -1,0 +1,193 @@
+:root {
+  color-scheme: dark;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: #f3f4f6;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: rgba(10, 12, 16, 0.55);
+  backdrop-filter: blur(8px);
+}
+
+.app-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.top-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(20, 22, 28, 0.7);
+}
+
+.controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.label {
+  opacity: 0.7;
+}
+
+select,
+button,
+input,
+textarea {
+  font-family: inherit;
+  font-size: 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(12, 14, 18, 0.8);
+  color: inherit;
+  padding: 6px 10px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.escape-hatch {
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.content {
+  display: flex;
+  flex: 1;
+}
+
+.overlay-panel {
+  flex: 1;
+  padding: 16px;
+}
+
+.chat-panel {
+  width: 320px;
+  padding: 16px;
+  border-left: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(14, 16, 20, 0.75);
+}
+
+.chat-panel h2 {
+  margin-top: 0;
+}
+
+.chat-panel textarea {
+  width: 100%;
+  resize: none;
+  margin-bottom: 8px;
+}
+
+.planner-note {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.plan-renderer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.widget {
+  background: rgba(16, 18, 24, 0.75);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 12px;
+}
+
+.widget h3 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.counter {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.counter span {
+  font-size: 20px;
+  min-width: 48px;
+  text-align: center;
+}
+
+.timer-display {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.timer-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.checklist {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 8px 0;
+}
+
+.checklist li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.checklist label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.checklist .checked {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+
+.checklist-add {
+  display: flex;
+  gap: 8px;
+}
+
+.panel-widget {
+  border: 1px solid rgba(64, 140, 255, 0.25);
+}
+
+.panel-children {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.error-banner {
+  background: rgba(180, 60, 60, 0.6);
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
