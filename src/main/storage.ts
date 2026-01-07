@@ -1,11 +1,13 @@
 import { app } from "electron";
 import { promises as fs } from "fs";
 import { join } from "path";
-import { OverlayPlan, OverlaySettings } from "../shared/ipc";
+import { OverlayPlan, OverlaySettings, PlanLoadResult } from "../shared/ipc";
+import { overlayPlanSchema } from "../shared/planSchema";
 
 const PROFILE_NAME = "default";
 const SETTINGS_FILE = "settings.json";
 const PLAN_FILE = "plan.json";
+const PLAN_LAST_GOOD_FILE = "plan.last-good.json";
 
 const defaultSettings: OverlaySettings = {
   bounds: null,
@@ -29,6 +31,29 @@ const readJson = async <T>(file: string, fallback: T): Promise<T> => {
   }
 };
 
+const readJsonUnknown = async (
+  file: string
+): Promise<{ data: unknown | null; missing: boolean; error?: string }> => {
+  try {
+    const raw = await fs.readFile(file, "utf-8");
+    return { data: JSON.parse(raw) as unknown, missing: false };
+  } catch (error: unknown) {
+    if (
+      error &&
+      typeof error === "object" &&
+      "code" in error &&
+      (error as { code?: unknown }).code === "ENOENT"
+    ) {
+      return { data: null, missing: true };
+    }
+    return {
+      data: null,
+      missing: false,
+      error: error instanceof Error ? error.message : "Unknown error"
+    };
+  }
+};
+
 const writeJson = async <T>(file: string, data: T): Promise<void> => {
   await fs.writeFile(file, JSON.stringify(data, null, 2), "utf-8");
 };
@@ -43,12 +68,70 @@ export const saveSettings = async (settings: OverlaySettings): Promise<void> => 
   await writeJson(join(dir, SETTINGS_FILE), settings);
 };
 
-export const loadPlan = async (): Promise<OverlayPlan | null> => {
+export const loadPlan = async (): Promise<PlanLoadResult> => {
   const dir = await ensureProfileDir();
-  return readJson(join(dir, PLAN_FILE), null);
+  const planPath = join(dir, PLAN_FILE);
+  const backupPath = join(dir, PLAN_LAST_GOOD_FILE);
+
+  const candidate = await readJsonUnknown(planPath);
+  if (candidate.data !== null) {
+    const validation = overlayPlanSchema.safeParse(candidate.data);
+    if (validation.success) {
+      return { plan: validation.data as OverlayPlan };
+    }
+
+    const backup = await readJsonUnknown(backupPath);
+    if (backup.data !== null) {
+      const backupValidation = overlayPlanSchema.safeParse(backup.data);
+      if (backupValidation.success) {
+        return {
+          plan: backupValidation.data as OverlayPlan,
+          warning: `Plan inválido en disco; usando último plan válido. ${validation.error.errors
+            .map((err) => err.message)
+            .join("; ")}`
+        };
+      }
+    }
+
+    return {
+      plan: null,
+      warning: `Plan inválido en disco y no se encontró respaldo válido. ${validation.error.errors
+        .map((err) => err.message)
+        .join("; ")}`
+    };
+  }
+
+  const backup = await readJsonUnknown(backupPath);
+  if (backup.data !== null) {
+    const backupValidation = overlayPlanSchema.safeParse(backup.data);
+    if (backupValidation.success) {
+      return { plan: backupValidation.data as OverlayPlan };
+    }
+  }
+
+  if (candidate.missing) {
+    return { plan: null };
+  }
+
+  return {
+    plan: null,
+    warning: candidate.error
+      ? `No se pudo leer plan.json. ${candidate.error}`
+      : "No se pudo leer plan.json."
+  };
 };
 
 export const savePlan = async (plan: OverlayPlan): Promise<void> => {
+  const validation = overlayPlanSchema.safeParse(plan);
+  if (!validation.success) {
+    throw new Error(
+      `Refusing to save invalid plan: ${validation.error.errors
+        .map((err) => err.message)
+        .join("; ")}`
+    );
+  }
   const dir = await ensureProfileDir();
-  await writeJson(join(dir, PLAN_FILE), plan);
+  const payload = validation.data as OverlayPlan;
+  await writeJson(join(dir, PLAN_LAST_GOOD_FILE), payload);
+  await writeJson(join(dir, PLAN_FILE), payload);
 };

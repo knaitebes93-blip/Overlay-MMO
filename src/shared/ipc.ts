@@ -16,6 +16,11 @@ export type OverlayPlan = {
   widgets: OverlayWidget[];
 };
 
+export type PlanLoadResult = {
+  plan: OverlayPlan | null;
+  warning?: string;
+};
+
 export type OverlayWidget =
   | TextWidget
   | CounterWidget
@@ -71,7 +76,7 @@ export type OverlayAPI = {
   saveSettings: (settings: OverlaySettings) => Promise<void>;
   getDisplays: () => Promise<DisplayInfo[]>;
   setDisplay: (displayId: number) => Promise<void>;
-  loadPlan: () => Promise<OverlayPlan | null>;
+  loadPlan: () => Promise<PlanLoadResult>;
   savePlan: (plan: OverlayPlan) => Promise<void>;
   onEscapeHatch: (callback: () => void) => () => void;
 };

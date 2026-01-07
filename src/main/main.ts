@@ -55,8 +55,9 @@ const rectsIntersect = (a: Electron.Rectangle, b: Electron.Rectangle) => {
 };
 
 const createOverlayWindow = async () => {
-  cachedSettings = await loadSettings();
-  const bounds = resolveBounds(cachedSettings);
+  const initialSettings = await loadSettings();
+  cachedSettings = initialSettings;
+  const bounds = resolveBounds(initialSettings);
 
   overlayWindow = new BrowserWindow({
     width: bounds.width,
@@ -78,18 +79,18 @@ const createOverlayWindow = async () => {
 
   overlayWindow.setAlwaysOnTop(true, "screen-saver");
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  overlayWindow.setOpacity(cachedSettings.opacity);
-  applyClickThrough(overlayWindow, cachedSettings.clickThrough);
+  overlayWindow.setOpacity(initialSettings.opacity);
+  applyClickThrough(overlayWindow, initialSettings.clickThrough);
 
-  if (cachedSettings.displayId !== null) {
+  if (initialSettings.displayId !== null) {
     const displays = screen.getAllDisplays();
     const target =
-      displays.find((display) => display.id === cachedSettings.displayId) ?? screen.getPrimaryDisplay();
+      displays.find((display) => display.id === initialSettings.displayId) ?? screen.getPrimaryDisplay();
     const currentBounds = overlayWindow.getBounds();
-    const hasSavedBounds = Boolean(cachedSettings.bounds);
+    const hasSavedBounds = Boolean(initialSettings.bounds);
     const alreadyOnTargetDisplay = rectsIntersect(currentBounds, target.bounds);
     if (!hasSavedBounds || !alreadyOnTargetDisplay) {
-      positionOnDisplay(overlayWindow, cachedSettings.displayId);
+      positionOnDisplay(overlayWindow, initialSettings.displayId);
     }
   }
 

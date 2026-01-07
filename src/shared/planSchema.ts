@@ -5,6 +5,8 @@ const baseWidget = z.object({
   title: z.string().optional()
 });
 
+let widgetSchema: z.ZodTypeAny;
+
 export const textWidgetSchema = baseWidget.extend({
   type: z.literal("text"),
   text: z.string()
@@ -35,18 +37,18 @@ export const checklistWidgetSchema = baseWidget.extend({
 
 export const panelWidgetSchema = baseWidget.extend({
   type: z.literal("panel"),
-  children: z.array(
-    z.lazy(() => widgetSchema)
-  )
+  children: z.array(z.lazy(() => widgetSchema))
 });
 
-export const widgetSchema = z.discriminatedUnion("type", [
+widgetSchema = z.discriminatedUnion("type", [
   textWidgetSchema,
   counterWidgetSchema,
   timerWidgetSchema,
   checklistWidgetSchema,
   panelWidgetSchema
 ]);
+
+export { widgetSchema };
 
 export const overlayPlanSchema = z.object({
   version: z.literal("1.0"),

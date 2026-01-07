@@ -29,9 +29,9 @@
 - Keeps the last known good plan if validation fails.
 
 **Definition of Done**
-- [ ] Chat panel accepts messages and triggers planner output.
-- [ ] Invalid plans surface an error and keep the last valid plan.
-- [ ] Widgets render from the plan with the expected data.
+- [x] Chat panel accepts messages and triggers planner output.
+- [x] Invalid plans surface an error and keep the last valid plan.
+- [x] Widgets render from the plan with the expected data.
 
 **Manual test steps (Windows)**
 1. Type `text: Hello overlay` and submit.

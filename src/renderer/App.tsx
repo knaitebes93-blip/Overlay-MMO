@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { DisplayInfo, OverlayPlan, OverlaySettings, OverlayWidget } from "../shared/ipc";
-import { overlayPlanSchema } from "./planSchema";
+import { overlayPlanSchema } from "../shared/planSchema";
 import { defaultPlan, plannerStub } from "./planner";
 import PlanRenderer from "./PlanRenderer";
 
@@ -35,35 +35,40 @@ const App = () => {
   const [plan, setPlan] = useState<OverlayPlan | null>(null);
   const [lastValidPlan, setLastValidPlan] = useState<OverlayPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
+  const [planWarning, setPlanWarning] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [plannerNote, setPlannerNote] = useState("Ready.");
   const overlayAPI = window.overlayAPI;
+  const defaultPlanMemo = useMemo(() => defaultPlan(), []);
 
   useEffect(() => {
     const bootstrap = async () => {
       if (!overlayAPI) {
         setPlannerNote("Preload bridge not loaded. Restart dev server after rebuilding Electron.");
         setSettings(fallbackSettings);
-        setPlan(defaultPlan());
+        setPlan(defaultPlanMemo);
         return;
       }
-      const [loadedSettings, displayList, storedPlan] = await Promise.all([
+      const [loadedSettings, displayList, stored] = await Promise.all([
         overlayAPI.getSettings(),
         overlayAPI.getDisplays(),
         overlayAPI.loadPlan()
       ]);
       setSettings(loadedSettings);
       setDisplays(displayList);
-      if (storedPlan) {
-        setPlan(storedPlan);
+      if (stored.warning) {
+        setPlanWarning(stored.warning);
+      }
+      if (stored.plan) {
+        setPlan(stored.plan);
       } else {
-        const initialPlan = defaultPlan();
+        const initialPlan = defaultPlanMemo;
         setPlan(initialPlan);
         await overlayAPI.savePlan(initialPlan);
       }
     };
     bootstrap().catch(() => undefined);
-  }, [overlayAPI]);
+  }, [overlayAPI, defaultPlanMemo]);
 
   useEffect(() => {
     if (!plan) {
@@ -88,7 +93,10 @@ const App = () => {
     });
   }, [overlayAPI]);
 
-  const activePlan = useMemo(() => lastValidPlan ?? plan, [lastValidPlan, plan]);
+  const activePlan = useMemo(
+    () => lastValidPlan ?? plan ?? defaultPlanMemo,
+    [lastValidPlan, plan, defaultPlanMemo]
+  );
 
   const saveSettings = async (next: OverlaySettings) => {
     setSettings(next);
@@ -128,12 +136,14 @@ const App = () => {
     }
     const next = { ...plan, widgets: updateWidgetById(plan.widgets, updated) };
     setPlan(next);
-    overlayAPI?.savePlan(next).catch(() => undefined);
+    overlayAPI?.savePlan(next).catch((error: unknown) => {
+      setPlanError(error instanceof Error ? error.message : "Failed to save plan.");
+    });
   };
 
   const handleChatSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!plan || !overlayAPI) {
+    if (!plan) {
       return;
     }
     const result = plannerStub(chatInput, plan);
@@ -144,7 +154,10 @@ const App = () => {
       setPlan(result.plan);
       setLastValidPlan(result.plan);
       setPlanError(null);
-      await overlayAPI.savePlan(result.plan);
+      setPlanWarning(null);
+      if (overlayAPI) {
+        await overlayAPI.savePlan(result.plan);
+      }
     } else {
       setPlanError(validation.error.errors.map((err) => err.message).join("; "));
     }
@@ -189,9 +202,15 @@ const App = () => {
 
       <main className="content">
         <section className="overlay-panel">
-          {planError && (
+          {(planWarning || planError) && (
             <div className="error-banner">
-              Plan validation failed. Keeping last valid plan. {planError}
+              {planWarning && (
+                <>
+                  {planWarning}
+                  {planError ? " " : ""}
+                </>
+              )}
+              {planError && <>Plan validation failed. Keeping last valid plan. {planError}</>}
             </div>
           )}
           {activePlan && (
