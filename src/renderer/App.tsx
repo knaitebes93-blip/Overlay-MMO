@@ -4,6 +4,13 @@ import { overlayPlanSchema } from "./planSchema";
 import { defaultPlan, plannerStub } from "./planner";
 import PlanRenderer from "./PlanRenderer";
 
+const fallbackSettings: OverlaySettings = {
+  bounds: null,
+  displayId: null,
+  opacity: 0.92,
+  clickThrough: false
+};
+
 const updateWidgetById = (
   widgets: OverlayWidget[],
   updated: OverlayWidget
@@ -30,13 +37,20 @@ const App = () => {
   const [planError, setPlanError] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [plannerNote, setPlannerNote] = useState("Ready.");
+  const overlayAPI = window.overlayAPI;
 
   useEffect(() => {
     const bootstrap = async () => {
+      if (!overlayAPI) {
+        setPlannerNote("Preload bridge not loaded. Restart dev server after rebuilding Electron.");
+        setSettings(fallbackSettings);
+        setPlan(defaultPlan());
+        return;
+      }
       const [loadedSettings, displayList, storedPlan] = await Promise.all([
-        window.overlayAPI.getSettings(),
-        window.overlayAPI.getDisplays(),
-        window.overlayAPI.loadPlan()
+        overlayAPI.getSettings(),
+        overlayAPI.getDisplays(),
+        overlayAPI.loadPlan()
       ]);
       setSettings(loadedSettings);
       setDisplays(displayList);
@@ -45,11 +59,11 @@ const App = () => {
       } else {
         const initialPlan = defaultPlan();
         setPlan(initialPlan);
-        await window.overlayAPI.savePlan(initialPlan);
+        await overlayAPI.savePlan(initialPlan);
       }
     };
     bootstrap().catch(() => undefined);
-  }, []);
+  }, [overlayAPI]);
 
   useEffect(() => {
     if (!plan) {
@@ -65,17 +79,23 @@ const App = () => {
   }, [plan]);
 
   useEffect(() => {
-    return window.overlayAPI.onEscapeHatch(() => {
+    if (!overlayAPI) {
+      return;
+    }
+    return overlayAPI.onEscapeHatch(() => {
       setPlannerNote("Escape hatch used: overlay unlocked.");
       setSettings((prev) => (prev ? { ...prev, clickThrough: false } : prev));
     });
-  }, []);
+  }, [overlayAPI]);
 
   const activePlan = useMemo(() => lastValidPlan ?? plan, [lastValidPlan, plan]);
 
   const saveSettings = async (next: OverlaySettings) => {
     setSettings(next);
-    await window.overlayAPI.saveSettings(next);
+    if (!overlayAPI) {
+      return;
+    }
+    await overlayAPI.saveSettings(next);
   };
 
   const handleOpacityChange = (value: number) => {
@@ -94,7 +114,9 @@ const App = () => {
 
   const handleDisplayChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
     const displayId = Number(event.target.value);
-    await window.overlayAPI.setDisplay(displayId);
+    if (overlayAPI) {
+      await overlayAPI.setDisplay(displayId);
+    }
     if (settings) {
       saveSettings({ ...settings, displayId });
     }
@@ -106,12 +128,12 @@ const App = () => {
     }
     const next = { ...plan, widgets: updateWidgetById(plan.widgets, updated) };
     setPlan(next);
-    window.overlayAPI.savePlan(next).catch(() => undefined);
+    overlayAPI?.savePlan(next).catch(() => undefined);
   };
 
   const handleChatSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!plan) {
+    if (!plan || !overlayAPI) {
       return;
     }
     const result = plannerStub(chatInput, plan);
@@ -122,7 +144,7 @@ const App = () => {
       setPlan(result.plan);
       setLastValidPlan(result.plan);
       setPlanError(null);
-      await window.overlayAPI.savePlan(result.plan);
+      await overlayAPI.savePlan(result.plan);
     } else {
       setPlanError(validation.error.errors.map((err) => err.message).join("; "));
     }

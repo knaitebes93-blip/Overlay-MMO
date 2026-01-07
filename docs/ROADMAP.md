@@ -8,10 +8,10 @@
 - Persists window bounds, opacity, and display selection.
 
 **Definition of Done**
-- [ ] `npm run dev` launches the overlay window without errors.
-- [ ] Window stays on top and can be moved/resized in interactive mode.
-- [ ] Click-through mode ignores mouse input and is recoverable via escape hatch.
-- [ ] Opacity changes persist after restarting the app.
+- [x] `npm run dev` launches the overlay window without errors.
+- [x] Window stays on top and can be moved/resized in interactive mode.
+- [x] Click-through mode ignores mouse input and is recoverable via escape hatch.
+- [x] Opacity changes persist after restarting the app.
 - [ ] Display selection persists and repositions the window on restart.
 
 **Manual test steps (Windows)**

@@ -25,7 +25,7 @@ const appPackage = {
   name: rootPackage.name,
   version: rootPackage.version,
   private: true,
-  main: "electron/main.js"
+  main: "electron/main/main.js"
 };
 
 fs.writeFileSync(
