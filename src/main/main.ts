@@ -54,9 +54,6 @@ const rectsIntersect = (a: Electron.Rectangle, b: Electron.Rectangle) => {
   return a.x < bx2 && ax2 > b.x && a.y < by2 && ay2 > b.y;
 };
 
-const boundsEqual = (a: Electron.Rectangle, b: Electron.Rectangle) =>
-  a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
-
 const createOverlayWindow = async () => {
   cachedSettings = await loadSettings();
   const bounds = resolveBounds(cachedSettings);
@@ -112,7 +109,6 @@ const createOverlayWindow = async () => {
   };
 
   let boundsTimer: NodeJS.Timeout | null = null;
-  let boundsInterval: NodeJS.Timeout | null = null;
   const schedulePersist = () => {
     if (boundsTimer) {
       clearTimeout(boundsTimer);
@@ -127,25 +123,10 @@ const createOverlayWindow = async () => {
   overlayWindow.on("will-move", schedulePersist);
   overlayWindow.on("resize", schedulePersist);
 
-  boundsInterval = setInterval(() => {
-    if (!overlayWindow || !cachedSettings) {
-      return;
-    }
-    const currentBounds = overlayWindow.getBounds();
-    if (!cachedSettings.bounds || !boundsEqual(cachedSettings.bounds, currentBounds)) {
-      cachedSettings.bounds = currentBounds;
-      saveSettings(cachedSettings).catch(() => undefined);
-    }
-  }, 1000);
-
   overlayWindow.on("close", () => {
     if (boundsTimer) {
       clearTimeout(boundsTimer);
       boundsTimer = null;
-    }
-    if (boundsInterval) {
-      clearInterval(boundsInterval);
-      boundsInterval = null;
     }
     persistBounds().catch(() => undefined);
   });
