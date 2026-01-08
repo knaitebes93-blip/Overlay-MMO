@@ -35,6 +35,7 @@ const defaultSettings: OverlaySettings = {
   captureSourceType: null,
   captureSourceId: null,
   captureRoi: null,
+  uiMode: "gameplay",
   llm: {
     enabled: false,
     provider: "ollama",

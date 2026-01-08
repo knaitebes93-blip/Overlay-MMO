@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CaptureRoi,
   CaptureSnapshotResult,
@@ -32,6 +32,7 @@ const fallbackSettings: OverlaySettings = {
   captureSourceType: null,
   captureSourceId: null,
   captureRoi: null,
+  uiMode: "gameplay",
   llm: {
     enabled: false,
     provider: "ollama",
@@ -150,6 +151,14 @@ const formatRateTemplate = (template: string, rate: number, unit: string, value:
 
 const normalizeOcrText = (text: string) => text.replace(/\s+/g, " ").trim();
 
+const formatCaptureError = (message: string) => {
+  const lower = message.toLowerCase();
+  if (lower.includes("minimized")) {
+    return "Selected window is minimized. Restore it before setting ROI.";
+  }
+  return message;
+};
+
 const buildOcrPreview = (text: string) => {
   if (text.length <= OCR_PREVIEW_LIMIT) {
     return text;
@@ -157,8 +166,14 @@ const buildOcrPreview = (text: string) => {
   return `${text.slice(0, OCR_PREVIEW_LIMIT - 3)}...`;
 };
 
+const truncateText = (value: string, limit: number) =>
+  value.length > limit ? `${value.slice(0, limit - 3)}...` : value;
+
 const formatCaptureTime = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+type UiMode = OverlaySettings["uiMode"];
+type InspectorTab = "widget" | "events" | "rules" | "memory" | "capture" | "profiles";
 
 const App = () => {
   const [settings, setSettings] = useState<OverlaySettings | null>(null);
@@ -193,6 +208,9 @@ const App = () => {
   const [roiError, setRoiError] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [plannerNote, setPlannerNote] = useState("Ready.");
+  const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("widget");
+  const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
   const overlayAPI = window.overlayAPI;
   const defaultPlanMemo = useMemo(() => defaultPlan(), []);
   const captureInFlightRef = useRef(false);
@@ -203,6 +221,7 @@ const App = () => {
     startX: 0,
     startY: 0
   });
+  const uiMode: UiMode = settings?.uiMode ?? "gameplay";
   const loadCaptureSources = useCallback(async () => {
     if (!overlayAPI || typeof overlayAPI.listCaptureSources !== "function") {
       setCaptureSourcesError("Capture source API not available. Restart Electron.");
@@ -452,6 +471,16 @@ const App = () => {
     }
   };
 
+  const handleModeChange = (next: UiMode) => {
+    if (!settings) {
+      return;
+    }
+    if (next === "inspect") {
+      setInspectorCollapsed(false);
+    }
+    saveSettings({ ...settings, uiMode: next });
+  };
+
   const handleCaptureSourceChange = (event: React.ChangeEvent<HTMLSelectElement>) => {
     if (!settings) {
       return;
@@ -507,7 +536,8 @@ const App = () => {
       });
       setRoiSnapshot(snapshot);
     } catch (error: unknown) {
-      setCaptureError(error instanceof Error ? error.message : "Failed to capture snapshot.");
+      const message = error instanceof Error ? error.message : "Failed to capture snapshot.";
+      setCaptureError(formatCaptureError(message));
     }
   };
 
@@ -1095,6 +1125,15 @@ const App = () => {
     () => flatWidgets.filter((widget) => widget.type === "counter") as CounterWidget[],
     [flatWidgets]
   );
+  useEffect(() => {
+    if (flatWidgets.length === 0) {
+      setSelectedWidgetId(null);
+      return;
+    }
+    if (!selectedWidgetId || !flatWidgets.some((widget) => widget.id === selectedWidgetId)) {
+      setSelectedWidgetId(flatWidgets[0].id);
+    }
+  }, [flatWidgets, selectedWidgetId]);
   const llmHelp = useMemo(() => {
     const provider = settings?.llm.provider ?? "ollama";
     if (provider === "ollama") {
@@ -1170,6 +1209,14 @@ const App = () => {
     settings?.captureSourceId && settings?.captureSourceType
       ? `${settings.captureSourceType}:${settings.captureSourceId}`
       : "";
+  const selectedWidget = useMemo(
+    () => flatWidgets.find((widget) => widget.id === selectedWidgetId) ?? null,
+    [flatWidgets, selectedWidgetId]
+  );
+  const recentEventEntries = useMemo(
+    () => eventLog.entries.slice(-20).reverse(),
+    [eventLog.entries]
+  );
 
   const handleChatSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -1236,10 +1283,115 @@ const App = () => {
     }
   };
 
+  const renderWidgetDetails = (widget: OverlayWidget) => {
+    switch (widget.type) {
+      case "text":
+        return (
+          <div className="detail-row">
+            <span className="detail-label">Text</span>
+            <span className="detail-value">{truncateText(widget.text, 140)}</span>
+          </div>
+        );
+      case "counter":
+        return (
+          <>
+            <div className="detail-row">
+              <span className="detail-label">Value</span>
+              <span className="detail-value">{widget.value}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">Step</span>
+              <span className="detail-value">{widget.step}</span>
+            </div>
+          </>
+        );
+      case "timer":
+        return (
+          <>
+            <div className="detail-row">
+              <span className="detail-label">Seconds</span>
+              <span className="detail-value">{widget.seconds}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">Running</span>
+              <span className="detail-value">{widget.running ? "Yes" : "No"}</span>
+            </div>
+          </>
+        );
+      case "checklist": {
+        const checkedCount = widget.items.filter((item) => item.checked).length;
+        return (
+          <>
+            <div className="detail-row">
+              <span className="detail-label">Items</span>
+              <span className="detail-value">{widget.items.length}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">Checked</span>
+              <span className="detail-value">{checkedCount}</span>
+            </div>
+          </>
+        );
+      }
+      case "panel":
+        return (
+          <div className="detail-row">
+            <span className="detail-label">Children</span>
+            <span className="detail-value">{widget.children.length}</span>
+          </div>
+        );
+      case "eventLog":
+        return (
+          <>
+            <div className="detail-row">
+              <span className="detail-label">Event Type</span>
+              <span className="detail-value">{widget.eventType}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">Show Last</span>
+              <span className="detail-value">{widget.showLast}</span>
+            </div>
+          </>
+        );
+      case "rate":
+        return (
+          <>
+            <div className="detail-row">
+              <span className="detail-label">Event Type</span>
+              <span className="detail-value">{widget.eventType}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">Lookback</span>
+              <span className="detail-value">{widget.lookbackMinutes} min</span>
+            </div>
+          </>
+        );
+      case "projection":
+        return (
+          <>
+            <div className="detail-row">
+              <span className="detail-label">Event Type</span>
+              <span className="detail-value">{widget.eventType}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">Lookback</span>
+              <span className="detail-value">{widget.lookbackMinutes} min</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">Horizon</span>
+              <span className="detail-value">{widget.horizonMinutes} min</span>
+            </div>
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
-    <div className="app-root">
+    <div className="app-root" data-mode={uiMode}>
       <header className="top-bar">
-        <div className="controls">
+        <div className="runtime-controls">
           <div className="control-group">
             <span className="label">Opacity</span>
             <input
@@ -1254,17 +1406,6 @@ const App = () => {
           <button type="button" onClick={handleClickThroughToggle}>
             {settings?.clickThrough ? "Unlock (Interactive)" : "Lock (Click-through)"}
           </button>
-          <div className="control-group">
-            <span className="label">Plan</span>
-            <div className="plan-buttons">
-              <button type="button" onClick={handleUndoPlan}>
-                Undo
-              </button>
-              <button type="button" onClick={handleRedoPlan}>
-                Redo
-              </button>
-            </div>
-          </div>
           <div className="control-group">
             <span className="label">Display</span>
             <select value={settings?.displayId ?? ""} onChange={handleDisplayChange}>
@@ -1289,24 +1430,44 @@ const App = () => {
             </button>
           </div>
         </div>
-        <div className="escape-hatch">
-          Escape Hatch: <strong>Ctrl + Shift + O</strong>
+        <div className="top-bar-right">
+          <div className="mode-switch">
+            <span className="label">Mode</span>
+            <div className="mode-buttons">
+              <button
+                type="button"
+                className={uiMode === "gameplay" ? "active" : ""}
+                onClick={() => handleModeChange("gameplay")}
+                disabled={!settings}
+              >
+                Gameplay
+              </button>
+              <button
+                type="button"
+                className={uiMode === "inspect" ? "active" : ""}
+                onClick={() => handleModeChange("inspect")}
+                disabled={!settings}
+              >
+                Inspect
+              </button>
+              <button
+                type="button"
+                className={uiMode === "compose" ? "active" : ""}
+                onClick={() => handleModeChange("compose")}
+                disabled={!settings}
+              >
+                Compose
+              </button>
+            </div>
+          </div>
+          <div className="escape-hatch">
+            Escape Hatch: <strong>Ctrl + Shift + O</strong>
+          </div>
         </div>
       </header>
 
       <main className="content">
-        <section className="overlay-panel">
-          {(planWarning || planError || eventLogError) && (
-            <div className="error-banner">
-              {planWarning && <div>{planWarning}</div>}
-              {planError && (
-                <div>
-                  Plan validation failed. Keeping last valid plan. {planError}
-                </div>
-              )}
-              {eventLogError && <div>Event log error. {eventLogError}</div>}
-            </div>
-          )}
+        <section className="widget-canvas">
           {activePlan && (
             <PlanRenderer
               plan={activePlan}
@@ -1317,250 +1478,416 @@ const App = () => {
           )}
         </section>
 
-        <aside className="chat-panel">
-          <h2>AI Composer MVP</h2>
-          <p className="planner-note">{plannerNote}</p>
-          <form onSubmit={handleChatSubmit}>
-            <textarea
-              value={chatInput}
-              onChange={(event) => setChatInput(event.target.value)}
-              placeholder="Try: text: Welcome to the raid"
-              rows={6}
-            />
-            <button type="submit">Compose Plan</button>
-          </form>
-          <div className="chat-hints">
-            <p>Planner commands:</p>
-            <ul>
-              <li><strong>reset</strong> - restore default overlay plan</li>
-              <li><strong>text: ...</strong> - create a text-only plan</li>
-            </ul>
-          </div>
-          <div className="llm-panel">
-            <h3>AI Provider</h3>
-            <label className="llm-toggle">
-              <input
-                type="checkbox"
-                checked={settings?.llm.enabled ?? false}
-                onChange={(event) => updateLlmSettings({ enabled: event.target.checked })}
-              />
-              <span>Enable LLM Composer</span>
-            </label>
-            {llmError && <p className="capture-error">{llmError}</p>}
-            <div className="llm-form">
-              <select
-                value={settings?.llm.provider ?? "ollama"}
-                onChange={(event) => handleLlmProviderChange(event.target.value as LlmProvider)}
-              >
-                <option value="ollama">Ollama (local)</option>
-                <option value="lmstudio">LM Studio (local)</option>
-                <option value="openai">OpenAI</option>
-                <option value="groq">Groq</option>
-                <option value="openrouter">OpenRouter</option>
-                <option value="mistral">Mistral</option>
-                <option value="custom">Custom</option>
-              </select>
-              <input
-                value={settings?.llm.baseUrl ?? ""}
-                onChange={(event) => updateLlmSettings({ baseUrl: event.target.value })}
-                placeholder="Base URL"
-              />
-              <input
-                value={settings?.llm.model ?? ""}
-                onChange={(event) => updateLlmSettings({ model: event.target.value })}
-                placeholder="Model"
-              />
-              <input
-                type="password"
-                value={settings?.llm.apiKey ?? ""}
-                onChange={(event) => updateLlmSettings({ apiKey: event.target.value })}
-                placeholder="API key (optional for local)"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  const provider = settings?.llm.provider ?? "ollama";
-                  const defaults = llmDefaults[provider];
-                  updateLlmSettings({
-                    baseUrl: defaults.baseUrl,
-                    model: defaults.model,
-                    apiKey: defaults.apiKey ?? ""
-                  });
-                }}
-              >
-                Use defaults
-              </button>
-            </div>
-            {llmHelp}
-          </div>
-          <div className="capture-panel">
-            <h3>Capture OCR</h3>
-            <p className="capture-status">{captureStatus}</p>
-            {captureError && <p className="capture-error">{captureError}</p>}
-            <p className="capture-meta">
-              {lastCaptureAt
-                ? `Last capture ${formatCaptureTime(lastCaptureAt)}`
-                : "No captures yet."}
-              {lastOcrConfidence !== null ? ` | Confidence ${lastOcrConfidence}%` : ""}
-            </p>
-            <p className={lastOcrPreview ? "capture-preview" : "capture-preview muted"}>
-              {lastOcrPreview ?? "No OCR text yet."}
-            </p>
-            <p className="capture-meta">
-              ROI: {settings?.captureRoi ? "set" : "not set"}{" "}
-              <button type="button" onClick={() => startRoiSelection().catch(() => undefined)}>
-                Set ROI
-              </button>
-              {settings?.captureRoi && (
-                <button type="button" onClick={() => clearRoi().catch(() => undefined)}>
-                  Clear ROI
-                </button>
-              )}
-            </p>
-            <div className="capture-source">
-              <div className="capture-source-header">
-                <span className="capture-source-label">Source</span>
-                <button type="button" onClick={() => loadCaptureSources().catch(() => undefined)}>
-                  Refresh
-                </button>
+        {uiMode === "compose" && (
+          <aside className="side-panel composer-panel">
+            <div className="panel-header">
+              <div>
+                <div className="panel-title">Composer / AI</div>
+                <div className="panel-subtitle">Plan composition and validation</div>
               </div>
-              <select value={captureSourceValue} onChange={handleCaptureSourceChange}>
-                <option value="" disabled>
-                  Choose window or display
-                </option>
-                {displaySources.length > 0 && (
-                  <optgroup label="Displays">
-                    {displaySources.map((source) => (
-                      <option key={`display:${source.id}`} value={`display:${source.id}`}>
-                        {source.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-                {windowSources.length > 0 && (
-                  <optgroup label="Windows">
-                    {windowSources.map((source) => (
-                      <option key={`window:${source.id}`} value={`window:${source.id}`}>
-                        {source.processName ? `${source.name} (${source.processName})` : source.name}
-                      </option>
-                    ))}
-                  </optgroup>
-                )}
-              </select>
-              {captureSourcesError && <p className="capture-error">{captureSourcesError}</p>}
             </div>
-          </div>
-
-          <div className="memory-panel">
-            <h3>Memory</h3>
-            {memoryError && <p className="capture-error">{memoryError}</p>}
-            <div className="memory-form">
-              <input
-                value={memoryInput}
-                onChange={(event) => setMemoryInput(event.target.value)}
-                placeholder="Add a note (e.g., boss mechanic, reminder...)"
-              />
-              <button
-                type="button"
-                onClick={() => {
-                  handleAddMemoryEntry(memoryInput);
-                  setMemoryInput("");
-                }}
-              >
-                Add
-              </button>
-            </div>
-            <ul className="memory-list">
-              {memoryStore.entries.slice(0, 20).map((entry) => (
-                <li key={entry.id}>
-                  <span className="memory-time">{formatCaptureTime(entry.createdAt)}</span>
-                  <span className="memory-text">{entry.text}</span>
-                  <button type="button" onClick={() => handleDeleteMemoryEntry(entry.id)}>
-                    Delete
+            <div className="panel-scroll">
+              <div className="panel-section">
+                <h3>Status</h3>
+                <p className="planner-note">{plannerNote}</p>
+                {planWarning && <p className="status-warning">{planWarning}</p>}
+                {planError && (
+                  <p className="status-error">
+                    Plan validation failed. Keeping last valid plan. {planError}
+                  </p>
+                )}
+              </div>
+              <div className="panel-section">
+                <h3>Plan Tools</h3>
+                <div className="plan-buttons">
+                  <button type="button" onClick={handleUndoPlan}>
+                    Undo
                   </button>
-                </li>
-              ))}
-              {memoryStore.entries.length === 0 && (
-                <li className="memory-empty">No memory entries yet.</li>
-              )}
-            </ul>
-          </div>
-
-          <div className="rules-panel">
-            <h3>Rules (Passive)</h3>
-            {rulesError && <p className="capture-error">{rulesError}</p>}
-            <div className="rules-form">
-              <select value={ruleMode} onChange={(e) => setRuleMode(e.target.value as Rule["mode"])}>
-                <option value="includes">Includes</option>
-                <option value="regex">Regex</option>
-              </select>
-              <input
-                value={rulePattern}
-                onChange={(e) => setRulePattern(e.target.value)}
-                placeholder={ruleMode === "regex" ? "Pattern (regex)" : "Text to match"}
-              />
-              <select
-                value={ruleActionType}
-                onChange={(e) =>
-                  setRuleActionType(e.target.value as Rule["action"]["type"])
-                }
-              >
-                <option value="setTextWidget">Set Text Widget</option>
-                <option value="incrementCounter">Increment Counter</option>
-              </select>
-              <select value={ruleWidgetId} onChange={(e) => setRuleWidgetId(e.target.value)}>
-                <option value="" disabled>
-                  Choose widget
-                </option>
-                {(ruleActionType === "setTextWidget" ? textWidgets : counterWidgets).map((widget) => (
-                  <option key={widget.id} value={widget.id}>
-                    {widget.title ? `${widget.title} (${widget.id})` : widget.id}
-                  </option>
-                ))}
-              </select>
-              {ruleActionType === "setTextWidget" ? (
-                <input
-                  value={ruleTemplate}
-                  onChange={(e) => setRuleTemplate(e.target.value)}
-                  placeholder="Template (use ${text}, ${match0}, ${g1}...)"
-                />
-              ) : (
-                <input
-                  type="number"
-                  value={ruleAmount}
-                  onChange={(e) => setRuleAmount(Number(e.target.value))}
-                />
-              )}
-              <button type="button" onClick={handleAddRule}>
-                Add Rule
+                  <button type="button" onClick={handleRedoPlan}>
+                    Redo
+                  </button>
+                </div>
+              </div>
+              <div className="panel-section">
+                <h3>Compose</h3>
+                <form onSubmit={handleChatSubmit}>
+                  <textarea
+                    value={chatInput}
+                    onChange={(event) => setChatInput(event.target.value)}
+                    placeholder="Try: text: Welcome to the raid"
+                    rows={6}
+                  />
+                  <button type="submit">Compose Plan</button>
+                </form>
+                <div className="chat-hints">
+                  <p>Planner commands:</p>
+                  <ul>
+                    <li><strong>reset</strong> - restore default overlay plan</li>
+                    <li><strong>text: ...</strong> - create a text-only plan</li>
+                  </ul>
+                </div>
+              </div>
+              <div className="llm-panel">
+                <h3>AI Provider</h3>
+                <label className="llm-toggle">
+                  <input
+                    type="checkbox"
+                    checked={settings?.llm.enabled ?? false}
+                    onChange={(event) => updateLlmSettings({ enabled: event.target.checked })}
+                  />
+                  <span>Enable LLM Composer</span>
+                </label>
+                {llmError && <p className="capture-error">{llmError}</p>}
+                <div className="llm-form">
+                  <select
+                    value={settings?.llm.provider ?? "ollama"}
+                    onChange={(event) => handleLlmProviderChange(event.target.value as LlmProvider)}
+                  >
+                    <option value="ollama">Ollama (local)</option>
+                    <option value="lmstudio">LM Studio (local)</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="groq">Groq</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="mistral">Mistral</option>
+                    <option value="custom">Custom</option>
+                  </select>
+                  <input
+                    value={settings?.llm.baseUrl ?? ""}
+                    onChange={(event) => updateLlmSettings({ baseUrl: event.target.value })}
+                    placeholder="Base URL"
+                  />
+                  <input
+                    value={settings?.llm.model ?? ""}
+                    onChange={(event) => updateLlmSettings({ model: event.target.value })}
+                    placeholder="Model"
+                  />
+                  <input
+                    type="password"
+                    value={settings?.llm.apiKey ?? ""}
+                    onChange={(event) => updateLlmSettings({ apiKey: event.target.value })}
+                    placeholder="API key (optional for local)"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const provider = settings?.llm.provider ?? "ollama";
+                      const defaults = llmDefaults[provider];
+                      updateLlmSettings({
+                        baseUrl: defaults.baseUrl,
+                        model: defaults.model,
+                        apiKey: defaults.apiKey ?? ""
+                      });
+                    }}
+                  >
+                    Use defaults
+                  </button>
+                </div>
+                {llmHelp}
+              </div>
+            </div>
+          </aside>
+        )}
+        {uiMode === "inspect" && (
+          <aside className={`side-panel inspector-panel${inspectorCollapsed ? " collapsed" : ""}`}>
+            <div className="panel-header">
+              <div className="panel-title">Inspector</div>
+              <button type="button" onClick={() => setInspectorCollapsed((prev) => !prev)}>
+                {inspectorCollapsed ? "Expand" : "Collapse"}
               </button>
             </div>
-
-            <ul className="rules-list">
-              {rulesStore.rules.map((rule) => (
-                <li key={rule.id}>
-                  <label className="rules-toggle">
-                    <input
-                      type="checkbox"
-                      checked={rule.enabled}
-                      onChange={() => handleToggleRule(rule.id)}
-                    />
-                    <span>{rule.id}</span>
-                  </label>
-                  <span className="rules-desc">
-                    {rule.mode}:{rule.pattern} → {rule.action.type} ({rule.action.widgetId}
-                    {rule.action.type === "trackRate" ? `, ${rule.action.template}` : ""}
+            {!inspectorCollapsed && (
+              <>
+                <div className="panel-tabs">
+                  {(["widget", "events", "rules", "memory", "capture", "profiles"] as InspectorTab[]).map(
+                    (tab) => (
+                      <button
+                        key={tab}
+                        type="button"
+                        className={inspectorTab === tab ? "active" : ""}
+                        onClick={() => setInspectorTab(tab)}
+                      >
+                        {tab === "widget"
+                          ? "Widget"
+                          : tab === "events"
+                            ? "Events"
+                            : tab === "rules"
+                              ? "Rules"
+                              : tab === "memory"
+                                ? "Memory"
+                                : tab === "capture"
+                                  ? "Capture"
+                                  : "Profiles"}
+                      </button>
                     )
-                  </span>
-                  <button type="button" onClick={() => handleDeleteRule(rule.id)}>
-                    Delete
-                  </button>
-                </li>
-              ))}
-              {rulesStore.rules.length === 0 && <li className="rules-empty">No rules yet.</li>}
-            </ul>
-          </div>
-        </aside>
+                  )}
+                </div>
+                <div className="panel-scroll">
+                  {inspectorTab === "widget" && (
+                    <div className="panel-section">
+                      <h3>Widget Inspector</h3>
+                      {flatWidgets.length === 0 ? (
+                        <p className="status-muted">No widgets in the active plan.</p>
+                      ) : (
+                        <>
+                          <div className="widget-list">
+                            {flatWidgets.map((widget) => (
+                              <button
+                                key={widget.id}
+                                type="button"
+                                className={`widget-item${selectedWidgetId === widget.id ? " selected" : ""}`}
+                                onClick={() => setSelectedWidgetId(widget.id)}
+                              >
+                                <span className="widget-name">
+                                  {widget.title ? widget.title : widget.id}
+                                </span>
+                                <span className="widget-type">{widget.type}</span>
+                              </button>
+                            ))}
+                          </div>
+                          {selectedWidget && (
+                            <div className="widget-details">
+                              <div className="detail-row">
+                                <span className="detail-label">Id</span>
+                                <span className="detail-value">{selectedWidget.id}</span>
+                              </div>
+                              <div className="detail-row">
+                                <span className="detail-label">Type</span>
+                                <span className="detail-value">{selectedWidget.type}</span>
+                              </div>
+                              {selectedWidget.title && (
+                                <div className="detail-row">
+                                  <span className="detail-label">Title</span>
+                                  <span className="detail-value">{selectedWidget.title}</span>
+                                </div>
+                              )}
+                              {renderWidgetDetails(selectedWidget)}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  {inspectorTab === "events" && (
+                    <div className="panel-section">
+                      <h3>Event Log</h3>
+                      {eventLogError && <p className="status-error">{eventLogError}</p>}
+                      {recentEventEntries.length === 0 ? (
+                        <p className="status-muted">No events logged yet.</p>
+                      ) : (
+                        <ul className="event-feed">
+                          {recentEventEntries.map((entry) => {
+                            const preview =
+                              entry.note ?? entry.data?.text ?? `Event ${entry.eventType}`;
+                            return (
+                              <li key={entry.id}>
+                                <div className="event-time">
+                                  {formatCaptureTime(entry.timestamp)}
+                                </div>
+                                <div className="event-body">
+                                  <span className="event-type">{entry.eventType}</span>
+                                  <span className="event-note">
+                                    {truncateText(preview, 140)}
+                                  </span>
+                                </div>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+
+                  {inspectorTab === "rules" && (
+                    <div className="rules-panel">
+                      <h3>Rules (Passive)</h3>
+                      {rulesError && <p className="capture-error">{rulesError}</p>}
+                      <div className="rules-form">
+                        <select
+                          value={ruleMode}
+                          onChange={(e) => setRuleMode(e.target.value as Rule["mode"])}
+                        >
+                          <option value="includes">Includes</option>
+                          <option value="regex">Regex</option>
+                        </select>
+                        <input
+                          value={rulePattern}
+                          onChange={(e) => setRulePattern(e.target.value)}
+                          placeholder={ruleMode === "regex" ? "Pattern (regex)" : "Text to match"}
+                        />
+                        <select
+                          value={ruleActionType}
+                          onChange={(e) =>
+                            setRuleActionType(e.target.value as Rule["action"]["type"])
+                          }
+                        >
+                          <option value="setTextWidget">Set Text Widget</option>
+                          <option value="incrementCounter">Increment Counter</option>
+                        </select>
+                        <select value={ruleWidgetId} onChange={(e) => setRuleWidgetId(e.target.value)}>
+                          <option value="" disabled>
+                            Choose widget
+                          </option>
+                          {(ruleActionType === "setTextWidget" ? textWidgets : counterWidgets).map((widget) => (
+                            <option key={widget.id} value={widget.id}>
+                              {widget.title ? `${widget.title} (${widget.id})` : widget.id}
+                            </option>
+                          ))}
+                        </select>
+                        {ruleActionType === "setTextWidget" ? (
+                          <input
+                            value={ruleTemplate}
+                            onChange={(e) => setRuleTemplate(e.target.value)}
+                            placeholder="Template (use ${text}, ${match0}, ${g1}...)"
+                          />
+                        ) : (
+                          <input
+                            type="number"
+                            value={ruleAmount}
+                            onChange={(e) => setRuleAmount(Number(e.target.value))}
+                          />
+                        )}
+                        <button type="button" onClick={handleAddRule}>
+                          Add Rule
+                        </button>
+                      </div>
+
+                      <ul className="rules-list">
+                        {rulesStore.rules.map((rule) => (
+                          <li key={rule.id}>
+                            <label className="rules-toggle">
+                              <input
+                                type="checkbox"
+                                checked={rule.enabled}
+                                onChange={() => handleToggleRule(rule.id)}
+                              />
+                              <span>{rule.id}</span>
+                            </label>
+                            <span className="rules-desc">
+                              {rule.mode}:{rule.pattern} {" -> "} {rule.action.type} ({rule.action.widgetId}
+                              {rule.action.type === "trackRate" ? `, ${rule.action.template}` : ""}
+                              )
+                            </span>
+                            <button type="button" onClick={() => handleDeleteRule(rule.id)}>
+                              Delete
+                            </button>
+                          </li>
+                        ))}
+                        {rulesStore.rules.length === 0 && <li className="rules-empty">No rules yet.</li>}
+                      </ul>
+                    </div>
+                  )}
+
+                  {inspectorTab === "memory" && (
+                    <div className="memory-panel">
+                      <h3>Memory</h3>
+                      {memoryError && <p className="capture-error">{memoryError}</p>}
+                      <div className="memory-form">
+                        <input
+                          value={memoryInput}
+                          onChange={(event) => setMemoryInput(event.target.value)}
+                          placeholder="Add a note (e.g., boss mechanic, reminder...)"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            handleAddMemoryEntry(memoryInput);
+                            setMemoryInput("");
+                          }}
+                        >
+                          Add
+                        </button>
+                      </div>
+                      <ul className="memory-list">
+                        {memoryStore.entries.slice(0, 20).map((entry) => (
+                          <li key={entry.id}>
+                            <span className="memory-time">{formatCaptureTime(entry.createdAt)}</span>
+                            <span className="memory-text">{entry.text}</span>
+                            <button type="button" onClick={() => handleDeleteMemoryEntry(entry.id)}>
+                              Delete
+                            </button>
+                          </li>
+                        ))}
+                        {memoryStore.entries.length === 0 && (
+                          <li className="memory-empty">No memory entries yet.</li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+
+                  {inspectorTab === "capture" && (
+                    <div className="capture-panel">
+                      <h3>Capture OCR</h3>
+                      <p className="capture-status">{captureStatus}</p>
+                      {captureError && <p className="capture-error">{captureError}</p>}
+                      <p className="capture-meta">
+                        {lastCaptureAt
+                          ? `Last capture ${formatCaptureTime(lastCaptureAt)}`
+                          : "No captures yet."}
+                        {lastOcrConfidence !== null ? ` | Confidence ${lastOcrConfidence}%` : ""}
+                      </p>
+                      <p className={lastOcrPreview ? "capture-preview" : "capture-preview muted"}>
+                        {lastOcrPreview ?? "No OCR text yet."}
+                      </p>
+                      <p className="capture-meta">
+                        ROI: {settings?.captureRoi ? "set" : "not set"}{" "}
+                        <button type="button" onClick={() => startRoiSelection().catch(() => undefined)}>
+                          Set ROI
+                        </button>
+                        {settings?.captureRoi && (
+                          <button type="button" onClick={() => clearRoi().catch(() => undefined)}>
+                            Clear ROI
+                          </button>
+                        )}
+                      </p>
+                      <div className="capture-source">
+                        <div className="capture-source-header">
+                          <span className="capture-source-label">Source</span>
+                          <button type="button" onClick={() => loadCaptureSources().catch(() => undefined)}>
+                            Refresh
+                          </button>
+                        </div>
+                        <select value={captureSourceValue} onChange={handleCaptureSourceChange}>
+                          <option value="" disabled>
+                            Choose window or display
+                          </option>
+                          {displaySources.length > 0 && (
+                            <optgroup label="Displays">
+                              {displaySources.map((source) => (
+                                <option key={`display:${source.id}`} value={`display:${source.id}`}>
+                                  {source.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                          {windowSources.length > 0 && (
+                            <optgroup label="Windows">
+                              {windowSources.map((source) => (
+                                <option key={`window:${source.id}`} value={`window:${source.id}`}>
+                                  {source.processName ? `${source.name} (${source.processName})` : source.name}
+                                </option>
+                              ))}
+                            </optgroup>
+                          )}
+                        </select>
+                        {captureSourcesError && <p className="capture-error">{captureSourcesError}</p>}
+                      </div>
+                    </div>
+                  )}
+
+                  {inspectorTab === "profiles" && (
+                    <div className="panel-section">
+                      <h3>Profiles</h3>
+                      <p className="status-muted">
+                        Active profile: default. Profile management is coming soon.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </aside>
+        )}
       </main>
 
       {roiSnapshot && (

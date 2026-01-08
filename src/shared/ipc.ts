@@ -7,6 +7,7 @@ export type OverlaySettings = {
   captureSourceType: CaptureSourceType | null;
   captureSourceId: string | null;
   captureRoi: CaptureRoi | null;
+  uiMode: "gameplay" | "compose" | "inspect";
   llm: LlmSettings;
 };
 
