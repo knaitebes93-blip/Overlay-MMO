@@ -49,6 +49,7 @@ const OCR_PREVIEW_LIMIT = 140;
 const emptyEventLog: EventLog = { version: "1.0", entries: [] };
 const emptyMemory: MemoryStore = { version: "1.0", entries: [] };
 const emptyRules: RulesStore = { version: "1.0", rules: [] };
+const PROFILE_ID = "default";
 
 const llmDefaults: Record<LlmProvider, { baseUrl: string; model: string; apiKey?: string }> = {
   openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
@@ -149,7 +150,7 @@ const formatRateTemplate = (template: string, rate: number, unit: string, value:
     .replace(/\$\{value\}/g, valueText);
 };
 
-const normalizeOcrText = (text: string) => text.replace(/\s+/g, " ").trim();
+const normalizePassiveText = (text: string) => text.replace(/\s+/g, " ").trim();
 
 const formatCaptureError = (message: string) => {
   const lower = message.toLowerCase();
@@ -171,6 +172,24 @@ const truncateText = (value: string, limit: number) =>
 
 const formatCaptureTime = (timestamp: number) =>
   new Date(timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+
+const buildManualEventText = (entry: EventLogEntry) => {
+  const parts = [];
+  if (entry.eventType) {
+    parts.push(entry.eventType);
+  }
+  if (entry.note) {
+    parts.push(entry.note);
+  }
+  return parts.join(" ").trim();
+};
+
+const isNoteEntry = (entry: MemoryEntry): entry is MemoryEntry & { type: "note" } =>
+  entry.type === "note";
+
+const isPlanSnapshotEntry = (
+  entry: MemoryEntry
+): entry is MemoryEntry & { type: "plan_snapshot" } => entry.type === "plan_snapshot";
 
 type UiMode = OverlaySettings["uiMode"];
 type InspectorTab = "widget" | "events" | "rules" | "memory" | "capture" | "profiles";
@@ -296,12 +315,12 @@ const App = () => {
         } else {
           const initialPlan = defaultPlanMemo;
           setPlan(initialPlan);
-          await overlayAPI.savePlan(initialPlan);
+          await overlayAPI.savePlan(initialPlan, { reason: "bootstrap", actor: "user" });
         }
       } else {
         const initialPlan = defaultPlanMemo;
         setPlan(initialPlan);
-        overlayAPI.savePlan(initialPlan).catch(() => undefined);
+        overlayAPI.savePlan(initialPlan, { reason: "bootstrap", actor: "user" }).catch(() => undefined);
       }
 
       if (typeof overlayAPI.loadEventLog === "function") {
@@ -388,6 +407,24 @@ const App = () => {
     loadCaptureSources().catch(() => undefined);
   }, [overlayAPI, loadCaptureSources]);
 
+  useEffect(() => {
+    if (inspectorTab !== "memory") {
+      return;
+    }
+    if (!overlayAPI || typeof overlayAPI.loadMemory !== "function") {
+      return;
+    }
+    overlayAPI
+      .loadMemory()
+      .then((loaded) => {
+        setMemoryStore(loaded);
+        setMemoryError(null);
+      })
+      .catch((error: unknown) => {
+        setMemoryError(error instanceof Error ? error.message : "Failed to load memory.");
+      });
+  }, [inspectorTab, overlayAPI]);
+
   const activePlan = useMemo(
     () => lastValidPlan ?? plan ?? defaultPlanMemo,
     [lastValidPlan, plan, defaultPlanMemo]
@@ -444,6 +481,21 @@ const App = () => {
       setPlanError(null);
     } catch (error: unknown) {
       setPlanError(error instanceof Error ? error.message : "Redo failed.");
+    }
+  };
+
+  const handleRollbackPlan = async (snapshotId: string) => {
+    if (!overlayAPI || typeof overlayAPI.rollbackPlan !== "function") {
+      setPlanError("Rollback API not available. Restart Electron.");
+      return;
+    }
+    try {
+      const next = await overlayAPI.rollbackPlan(snapshotId);
+      setPlan(next);
+      setLastValidPlan(next);
+      setPlanError(null);
+    } catch (error: unknown) {
+      setPlanError(error instanceof Error ? error.message : "Rollback failed.");
     }
   };
 
@@ -657,7 +709,7 @@ const App = () => {
     }
     const next = { ...plan, widgets: updateWidgetById(plan.widgets, updated) };
     setPlan(next);
-    overlayAPI?.savePlan(next).catch((error: unknown) => {
+    overlayAPI?.savePlan(next, { reason: "widget:update", actor: "user" }).catch((error: unknown) => {
       setPlanError(error instanceof Error ? error.message : "Failed to save plan.");
     });
   };
@@ -677,17 +729,35 @@ const App = () => {
     }
   }, [overlayAPI]);
 
-  const persistMemory = useCallback(
-    async (next: MemoryStore) => {
-      if (!overlayAPI || typeof overlayAPI.saveMemory !== "function") {
+  const addMemoryEntry = useCallback(
+    async (entry: MemoryEntry) => {
+      if (!overlayAPI || typeof overlayAPI.addMemoryEntry !== "function") {
         setMemoryError("Memory API not available. Restart Electron to load updated IPC handlers.");
         return;
       }
       try {
-        await overlayAPI.saveMemory(next);
+        const next = await overlayAPI.addMemoryEntry(entry);
+        setMemoryStore(next);
         setMemoryError(null);
       } catch (error: unknown) {
         setMemoryError(error instanceof Error ? error.message : "Failed to save memory.");
+      }
+    },
+    [overlayAPI]
+  );
+
+  const deleteMemoryEntry = useCallback(
+    async (entryId: string) => {
+      if (!overlayAPI || typeof overlayAPI.deleteMemoryEntry !== "function") {
+        setMemoryError("Memory API not available. Restart Electron to load updated IPC handlers.");
+        return;
+      }
+      try {
+        const next = await overlayAPI.deleteMemoryEntry(entryId);
+        setMemoryStore(next);
+        setMemoryError(null);
+      } catch (error: unknown) {
+        setMemoryError(error instanceof Error ? error.message : "Failed to delete memory entry.");
       }
     },
     [overlayAPI]
@@ -723,25 +793,24 @@ const App = () => {
       if (!trimmed) {
         return;
       }
-      const entry: MemoryEntry = { id: buildMemoryId(), createdAt: Date.now(), text: trimmed };
-      setMemoryStore((prev) => {
-        const next = { ...prev, entries: [entry, ...prev.entries].slice(0, 200) };
-        persistMemory(next).catch(() => undefined);
-        return next;
-      });
+      const entry: MemoryEntry = {
+        id: buildMemoryId(),
+        profileId: PROFILE_ID,
+        type: "note",
+        createdAt: Date.now(),
+        source: "user",
+        payload: { text: trimmed }
+      };
+      addMemoryEntry(entry).catch(() => undefined);
     },
-    [persistMemory]
+    [addMemoryEntry]
   );
 
   const handleDeleteMemoryEntry = useCallback(
     (id: string) => {
-      setMemoryStore((prev) => {
-        const next = { ...prev, entries: prev.entries.filter((entry) => entry.id !== id) };
-        persistMemory(next).catch(() => undefined);
-        return next;
-      });
+      deleteMemoryEntry(id).catch(() => undefined);
     },
-    [persistMemory]
+    [deleteMemoryEntry]
   );
 
   const validateRule = (rule: Rule) => {
@@ -832,15 +901,18 @@ const App = () => {
     [persistRules]
   );
 
-  const applyRulesFromOcr = useCallback(
-    async (ocrText: string, capturedAt: number) => {
+  type PassiveInput = { source: "ocr" | "manual_event"; text: string; timestamp: number };
+
+  const applyRulesFromPassiveInput = useCallback(
+    async (input: PassiveInput) => {
       if (!plan || !overlayAPI || typeof overlayAPI.savePlan !== "function") {
         return;
       }
-      const passiveText = normalizeOcrText(ocrText);
+      const passiveText = normalizePassiveText(input.text);
       if (!passiveText) {
         return;
       }
+      const capturedAt = input.timestamp;
       const enabledRules = rulesStore.rules.filter((rule) => rule.enabled);
       if (enabledRules.length === 0) {
         return;
@@ -986,7 +1058,7 @@ const App = () => {
       }
 
       try {
-        await overlayAPI.savePlan(nextPlan);
+        await overlayAPI.savePlan(nextPlan, { reason: "rules:apply", actor: "rules" });
         setPlan(nextPlan);
         setLastValidPlan(nextPlan);
 
@@ -1003,6 +1075,22 @@ const App = () => {
       }
     },
     [handleAddEventEntry, overlayAPI, persistRules, plan, rulesStore]
+  );
+
+  const handleAddManualEventEntry = useCallback(
+    (entry: EventLogEntry) => {
+      handleAddEventEntry(entry);
+      const passiveText = buildManualEventText(entry);
+      if (!passiveText) {
+        return;
+      }
+      applyRulesFromPassiveInput({
+        source: "manual_event",
+        text: passiveText,
+        timestamp: entry.timestamp
+      }).catch(() => undefined);
+    },
+    [applyRulesFromPassiveInput, handleAddEventEntry]
   );
 
   const captureOnce = useCallback(
@@ -1026,7 +1114,7 @@ const App = () => {
           setCaptureError("No screen sources available for capture.");
           return;
         }
-        const normalized = normalizeOcrText(result.text);
+        const normalized = normalizePassiveText(result.text);
         const trimmed = normalized.slice(0, OCR_TEXT_LIMIT);
         const preview = trimmed ? buildOcrPreview(trimmed) : "No text detected.";
         setLastOcrPreview(preview);
@@ -1051,7 +1139,11 @@ const App = () => {
           }
         };
         handleAddEventEntry(entry);
-        applyRulesFromOcr(result.text, result.capturedAt).catch(() => undefined);
+        applyRulesFromPassiveInput({
+          source: "ocr",
+          text: result.text,
+          timestamp: result.capturedAt
+        }).catch(() => undefined);
       } catch (error: unknown) {
         const detail =
           error instanceof Error
@@ -1066,7 +1158,7 @@ const App = () => {
         captureInFlightRef.current = false;
       }
     },
-    [applyRulesFromOcr, handleAddEventEntry, overlayAPI]
+    [applyRulesFromPassiveInput, handleAddEventEntry, overlayAPI]
   );
 
   useEffect(() => {
@@ -1217,6 +1309,14 @@ const App = () => {
     () => eventLog.entries.slice(-20).reverse(),
     [eventLog.entries]
   );
+  const noteEntries = useMemo(
+    () => memoryStore.entries.filter(isNoteEntry).slice(0, 20),
+    [memoryStore.entries]
+  );
+  const snapshotEntries = useMemo(() => {
+    const snapshots = memoryStore.entries.filter(isPlanSnapshotEntry);
+    return [...snapshots].sort((a, b) => b.createdAt - a.createdAt);
+  }, [memoryStore.entries]);
 
   const handleChatSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -1236,7 +1336,7 @@ const App = () => {
       setLlmError(null);
       setPlannerNote("Plan reset to defaults.");
       if (overlayAPI) {
-        await overlayAPI.savePlan(resetPlan);
+        await overlayAPI.savePlan(resetPlan, { reason: "reset", actor: "user" });
         await overlayAPI.saveRules(emptyRules);
       }
       return;
@@ -1276,7 +1376,7 @@ const App = () => {
       setPlanError(null);
       setPlanWarning(null);
       if (overlayAPI) {
-        await overlayAPI.savePlan(result.plan);
+        await overlayAPI.savePlan(result.plan, { reason: "compose", actor: "user" });
       }
     } else {
       setPlanError(validation.error.errors.map((err) => err.message).join("; "));
@@ -1472,7 +1572,7 @@ const App = () => {
             <PlanRenderer
               plan={activePlan}
               eventLog={eventLog}
-              onAddEventEntry={handleAddEventEntry}
+              onAddEventEntry={handleAddManualEventEntry}
               onUpdate={handleWidgetUpdate}
             />
           )}
@@ -1780,7 +1880,7 @@ const App = () => {
 
                   {inspectorTab === "memory" && (
                     <div className="memory-panel">
-                      <h3>Memory</h3>
+                      <h3>Memory Notes</h3>
                       {memoryError && <p className="capture-error">{memoryError}</p>}
                       <div className="memory-form">
                         <input
@@ -1799,19 +1899,41 @@ const App = () => {
                         </button>
                       </div>
                       <ul className="memory-list">
-                        {memoryStore.entries.slice(0, 20).map((entry) => (
+                        {noteEntries.map((entry) => (
                           <li key={entry.id}>
                             <span className="memory-time">{formatCaptureTime(entry.createdAt)}</span>
-                            <span className="memory-text">{entry.text}</span>
+                            <span className="memory-text">{entry.payload.text}</span>
                             <button type="button" onClick={() => handleDeleteMemoryEntry(entry.id)}>
                               Delete
                             </button>
                           </li>
                         ))}
-                        {memoryStore.entries.length === 0 && (
+                        {noteEntries.length === 0 && (
                           <li className="memory-empty">No memory entries yet.</li>
                         )}
                       </ul>
+                      <div className="memory-snapshots">
+                        <h4>Plan Snapshots</h4>
+                        <ul className="memory-list">
+                          {snapshotEntries.map((entry) => (
+                            <li key={entry.id}>
+                              <span className="memory-time">{formatCaptureTime(entry.createdAt)}</span>
+                              <span className="memory-text">
+                                {truncateText(entry.payload.reason, 80)} ({entry.payload.actor})
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleRollbackPlan(entry.payload.snapshotId)}
+                              >
+                                Rollback
+                              </button>
+                            </li>
+                          ))}
+                          {snapshotEntries.length === 0 && (
+                            <li className="memory-empty">No snapshots yet.</li>
+                          )}
+                        </ul>
+                      </div>
                     </div>
                   )}
 

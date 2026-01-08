@@ -96,25 +96,111 @@
 ## Phase 4: Overlay memory, rules engine, undo/rollback (deterministic)
 
 ### What the app does in this phase
-- Stores structured overlay memory per profile.
-- Adds a deterministic rules engine based on passive inputs only.
-- Supports undo/redo and rollback of overlay plan states.
+- Stores **structured overlay memory** per profile (overlay-only state, never game state).
+- Adds a **deterministic, event-driven rules engine** that reacts only to explicitly allowed passive inputs.
+- Supports **undo/redo** and **rollback** for overlay plan changes using immutable snapshots.
 
-### Key constraints
-- Rules are declarative and deterministic.
-- Rules cannot trigger automation.
-- Undo/redo operates on plans, not UI internals.
+---
+
+### Overlay memory (per profile)
+
+**Storage target**
+- Persist on local disk per profile (e.g., JSON/SQLite - implementation choice), versioned for migrations.
+
+**Minimum MemoryEntry schema**
+- `id: string` (uuid)
+- `profileId: string`
+- `type: "plan_snapshot" | "rule" | "rule_event" | "note" | "capture_meta" | "ocr_event" | "manual_event"`
+- `createdAt: number` (unix ms)
+- `source: "user" | "system" | "ocr" | "import"`
+- `payload: object` (type-specific, validated)
+- `tags?: string[]`
+
+**Retention / limits (initial defaults)**
+- Keep last **500** memory entries per profile (FIFO trimming).
+- Keep last **50** plan snapshots per profile.
+- Max payload size per entry: **256 KB** (reject or truncate safely).
+
+---
+
+### Passive inputs (allowed vs prohibited)
+
+**Allowed passive inputs (explicit list)**
+- Manual UI inputs (forms, buttons inside overlay)
+- Local event log entries
+- OCR outputs derived from opt-in captures (text + confidence + capture id)
+- Clipboard parse (opt-in, explicit enable)
+- Log import from local files (opt-in, user-selected file paths)
+
+**Explicitly prohibited inputs**
+- Reading game process memory
+- Injecting into game client
+- Sending mouse/keyboard inputs to the game
+- Network packet capture from the game
+- Any background automation that executes gameplay actions
+
+---
+
+### Rules engine (deterministic, event-driven)
+
+**Rules model**
+- Rules are declarative objects stored in memory with:
+  - `id`, `profileId`, `enabled`
+  - `when` (match conditions on passive input events)
+  - `then` (overlay-only actions)
+
+**Determinism constraints**
+- Rules run **only on event arrival** (no polling loops).
+- Rule evaluation is **pure**: given the same input event + same stored rule set, output is identical.
+- Rule actions are overlay-only:
+  - update plan (through validated patch)
+  - show/hide widget
+  - set widget props
+  - trigger visual alert
+  - append a memory entry (rule_event)
+
+**Safety**
+- Every rule action must produce a candidate plan that passes validation, otherwise discard and log an error entry.
+
+---
+
+### Undo/redo and rollback semantics
+
+**Snapshot granularity**
+- Any plan change (manual or rule-driven) creates a `plan_snapshot` entry:
+  - `snapshotId`, `planJson`, `reason`, `actor` ("user" | "rules")
+  - `baseSnapshotId` (parent pointer)
+
+**Undo / Redo**
+- Undo moves to the previous snapshot in the chain (last valid snapshot).
+- Redo moves forward only if no new snapshot has been created since the undo.
+
+**Rollback**
+- Rollback selects a specific `snapshotId` and restores exactly that `planJson`.
+
+**Rules interaction on restore**
+- Restoring a snapshot **does NOT retroactively re-run rules**.
+- After restore, rules resume only for **future incoming passive input events**.
+
+---
 
 ### Definition of Done
-- [ ] Memory entries persist per profile.
-- [ ] Rules react only to passive inputs.
-- [ ] Undo restores previous valid plan.
-- [ ] Rollback restores any past snapshot.
+- [x] Memory entries persist per profile and reload on restart.
+- [x] Retention limits are enforced (500 entries, 50 snapshots, 256KB payload cap).
+- [x] Allowed passive inputs are enforced; prohibited classes are not present in codepaths.
+- [x] Rules run event-driven only (no polling), and produce deterministic overlay-only outputs.
+- [x] Undo/redo works across user and rule-driven plan changes.
+- [x] Rollback restores a selected snapshot exactly and does not re-run historical rules.
 
-### Manual test steps
-1. Create memory entries and restart.
-2. Add a rule and verify UI updates.
-3. Undo and rollback changes.
+---
+
+### Manual test steps (Windows)
+1. Create two profiles; add distinct memory entries; restart; confirm separation and persistence.
+2. Trigger multiple plan changes (user + rules) and confirm snapshots are created and capped (50 max).
+3. Undo twice, redo once; confirm chain correctness and redo invalidation after a new change.
+4. Roll back to an older snapshot by selecting `snapshotId`; confirm exact plan restoration.
+5. Verify rules do not re-run on rollback (only on new events after restore).
+6. Confirm OCR/clipboard/log-import require explicit opt-in toggles and are disabled by default.
 
 ---
 

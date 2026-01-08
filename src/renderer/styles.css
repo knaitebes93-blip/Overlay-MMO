@@ -483,6 +483,19 @@ button:hover {
   opacity: 0.85;
 }
 
+.memory-snapshots {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.memory-snapshots h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  opacity: 0.75;
+}
+
 .memory-form,
 .rules-form {
   display: flex;

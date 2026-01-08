@@ -1,11 +1,14 @@
 import { app, BrowserWindow, ipcMain, screen, globalShortcut, nativeImage } from "electron";
 import { join } from "path";
 import {
+  addMemoryEntry,
+  deleteMemoryEntry,
   loadEventLog,
   loadMemory,
   loadPlan,
   loadRules,
   loadSettings,
+  rollbackPlan,
   redoPlan,
   saveCapture,
   saveEventLog,
@@ -22,11 +25,13 @@ import {
   CaptureTarget,
   DisplayInfo,
   EventLog,
+  MemoryEntry,
   MemoryStore,
   OcrResult,
   OverlayPlan,
   OverlaySettings,
   PlannerComposeInput,
+  PlanSaveMeta,
   RulesStore
 } from "../shared/ipc";
 import { runOcr, shutdownOcrWorker } from "./ocr";
@@ -68,16 +73,16 @@ $windows = New-Object System.Collections.Generic.List[object]
 [Win32Window]::EnumWindows({ param($hWnd, $lParam)
   if (-not [Win32Window]::IsWindowVisible($hWnd)) { return $true }
   $len = [Win32Window]::GetWindowTextLength($hWnd)
-  if ($len -le 0) { return $true }
-  $sb = New-Object System.Text.StringBuilder ($len + 1)
+  $sb = New-Object System.Text.StringBuilder ([Math]::Max($len, 1) + 1)
   [Win32Window]::GetWindowText($hWnd, $sb, $sb.Capacity) | Out-Null
   $title = $sb.ToString()
-  if ([string]::IsNullOrWhiteSpace($title)) { return $true }
-  if ($title -match "Program Manager" -or $title -match "Desktop Window Manager" -or $title -match "Overlay MMO") { return $true }
   $pid = 0
   [Win32Window]::GetWindowThreadProcessId($hWnd, [ref]$pid) | Out-Null
   $processName = ""
   try { $processName = (Get-Process -Id $pid -ErrorAction Stop).ProcessName } catch { $processName = "" }
+  if ([string]::IsNullOrWhiteSpace($title)) { $title = $processName }
+  if ([string]::IsNullOrWhiteSpace($title)) { $title = "Window $($hWnd.ToInt64())" }
+  if ($title -match "Program Manager" -or $title -match "Desktop Window Manager" -or $title -match "Overlay MMO") { return $true }
   $rect = New-Object Win32Window+RECT
   [Win32Window]::GetWindowRect($hWnd, [ref]$rect) | Out-Null
   $windows.Add([pscustomobject]@{
@@ -832,8 +837,12 @@ const registerIpc = () => {
 
   ipcMain.handle("plan:load", async () => loadPlan());
 
-  ipcMain.handle("plan:save", async (_event, plan: OverlayPlan) => {
-    await savePlan(plan);
+  ipcMain.handle("plan:save", async (_event, plan: OverlayPlan, meta?: PlanSaveMeta) => {
+    await savePlan(plan, meta);
+  });
+
+  ipcMain.handle("plan:rollback", async (_event, snapshotId: string): Promise<OverlayPlan> => {
+    return rollbackPlan(snapshotId);
   });
 
   ipcMain.handle("plan:undo", async (): Promise<OverlayPlan> => {
@@ -849,7 +858,7 @@ const registerIpc = () => {
     async (_event, input: PlannerComposeInput) => {
       cachedSettings = cachedSettings ?? (await loadSettings());
       const result = await composeWithLlm(input, cachedSettings?.llm);
-      await savePlan(result.plan);
+      await savePlan(result.plan, { reason: "compose", actor: "user" });
       await saveRules(result.rules);
       return result;
     }
@@ -867,6 +876,14 @@ const registerIpc = () => {
 
   ipcMain.handle("memory:save", async (_event, store: MemoryStore) => {
     await saveMemory(store);
+  });
+
+  ipcMain.handle("memory:add", async (_event, entry: MemoryEntry): Promise<MemoryStore> => {
+    return addMemoryEntry(entry);
+  });
+
+  ipcMain.handle("memory:delete", async (_event, entryId: string): Promise<MemoryStore> => {
+    return deleteMemoryEntry(entryId);
   });
 
   ipcMain.handle("rules:load", async (): Promise<RulesStore> => {

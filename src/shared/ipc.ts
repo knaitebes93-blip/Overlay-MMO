@@ -22,12 +22,46 @@ export type OverlayPlan = {
   widgets: OverlayWidget[];
 };
 
-export type MemoryEntry = {
-  id: string;
-  createdAt: number;
+export type MemoryEntrySource = "user" | "system" | "ocr" | "import";
+
+export type MemoryEntryType =
+  | "plan_snapshot"
+  | "rule"
+  | "rule_event"
+  | "note"
+  | "capture_meta"
+  | "ocr_event"
+  | "manual_event";
+
+export type PlanSnapshotPayload = {
+  snapshotId: string;
+  planJson: OverlayPlan;
+  reason: string;
+  actor: "user" | "rules";
+  baseSnapshotId?: string;
+};
+
+export type NotePayload = {
   text: string;
+};
+
+export type MemoryEntryBase = {
+  id: string;
+  profileId: string;
+  type: MemoryEntryType;
+  createdAt: number;
+  source: MemoryEntrySource;
   tags?: string[];
 };
+
+export type MemoryEntry =
+  | (MemoryEntryBase & { type: "plan_snapshot"; payload: PlanSnapshotPayload })
+  | (MemoryEntryBase & { type: "note"; payload: NotePayload })
+  | (MemoryEntryBase & { type: "rule"; payload: Record<string, unknown> })
+  | (MemoryEntryBase & { type: "rule_event"; payload: Record<string, unknown> })
+  | (MemoryEntryBase & { type: "capture_meta"; payload: Record<string, unknown> })
+  | (MemoryEntryBase & { type: "ocr_event"; payload: Record<string, unknown> })
+  | (MemoryEntryBase & { type: "manual_event"; payload: Record<string, unknown> });
 
 export type MemoryStore = {
   version: "1.0";
@@ -99,6 +133,11 @@ export type PlannerComposeResult = {
   plan: OverlayPlan;
   rules: RulesStore;
   note: string;
+};
+
+export type PlanSaveMeta = {
+  reason?: string;
+  actor?: "user" | "rules";
 };
 
 export type EventLogEntry = {
@@ -244,14 +283,17 @@ export type OverlayAPI = {
   getDisplays: () => Promise<DisplayInfo[]>;
   setDisplay: (displayId: number) => Promise<void>;
   loadPlan: () => Promise<PlanLoadResult>;
-  savePlan: (plan: OverlayPlan) => Promise<void>;
+  savePlan: (plan: OverlayPlan, meta?: PlanSaveMeta) => Promise<void>;
   undoPlan: () => Promise<OverlayPlan>;
   redoPlan: () => Promise<OverlayPlan>;
+  rollbackPlan: (snapshotId: string) => Promise<OverlayPlan>;
   composePlan: (input: PlannerComposeInput) => Promise<PlannerComposeResult>;
   loadEventLog: () => Promise<EventLog>;
   saveEventLog: (log: EventLog) => Promise<void>;
   loadMemory: () => Promise<MemoryStore>;
   saveMemory: (store: MemoryStore) => Promise<void>;
+  addMemoryEntry: (entry: MemoryEntry) => Promise<MemoryStore>;
+  deleteMemoryEntry: (entryId: string) => Promise<MemoryStore>;
   loadRules: () => Promise<RulesStore>;
   saveRules: (store: RulesStore) => Promise<void>;
   listCaptureSources: () => Promise<CaptureSource[]>;

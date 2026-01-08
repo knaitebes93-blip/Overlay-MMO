@@ -3,12 +3,14 @@ import {
   CaptureSnapshotResult,
   CaptureTarget,
   EventLog,
+  MemoryEntry,
   MemoryStore,
   OverlayAPI,
   OverlayPlan,
   OverlaySettings,
   PlannerComposeInput,
   PlannerComposeResult,
+  PlanSaveMeta,
   RulesStore
 } from "../shared/ipc";
 
@@ -32,15 +34,18 @@ const api: OverlayAPI = {
   getDisplays: () => ipcRenderer.invoke("app:get-displays"),
   setDisplay: (displayId: number) => ipcRenderer.invoke("app:set-display", displayId),
   loadPlan: () => ipcRenderer.invoke("plan:load"),
-  savePlan: (plan: OverlayPlan) => ipcRenderer.invoke("plan:save", plan),
+  savePlan: (plan: OverlayPlan, meta?: PlanSaveMeta) => ipcRenderer.invoke("plan:save", plan, meta),
   undoPlan: () => ipcRenderer.invoke("plan:undo"),
   redoPlan: () => ipcRenderer.invoke("plan:redo"),
+  rollbackPlan: (snapshotId: string) => ipcRenderer.invoke("plan:rollback", snapshotId),
   composePlan: (input: PlannerComposeInput): Promise<PlannerComposeResult> =>
     ipcRenderer.invoke("planner:compose", input),
   loadEventLog: () => ipcRenderer.invoke("event-log:load"),
   saveEventLog: (log: EventLog) => ipcRenderer.invoke("event-log:save", log),
   loadMemory: () => ipcRenderer.invoke("memory:load"),
   saveMemory: (store: MemoryStore) => ipcRenderer.invoke("memory:save", store),
+  addMemoryEntry: (entry: MemoryEntry) => ipcRenderer.invoke("memory:add", entry),
+  deleteMemoryEntry: (entryId: string) => ipcRenderer.invoke("memory:delete", entryId),
   loadRules: () => ipcRenderer.invoke("rules:load"),
   saveRules: (store: RulesStore) => ipcRenderer.invoke("rules:save", store),
   listCaptureSources: async () => {
