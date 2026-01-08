@@ -298,11 +298,11 @@ Introduce a single, versioned **WidgetSpec** contract and a deterministic **Widg
 ---
 
 ### Definition of Done
-- [ ] WidgetSpec v1.0 schema exists and validates all widgets.
-- [ ] All rendering uses WidgetSpec (no legacy paths).
-- [ ] Builder Engine produces deterministic plans and questions.
-- [ ] Invalid specs are rejected safely.
-- [ ] Undo/rollback works with WidgetSpec plans.
+- [x] WidgetSpec v1.0 schema exists and validates all widgets.
+- [x] All rendering uses WidgetSpec (no legacy paths).
+- [x] Builder Engine produces deterministic plans and questions.
+- [x] Invalid specs are rejected safely.
+- [x] Undo/rollback works with WidgetSpec plans.
 
 ---
 
