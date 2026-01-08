@@ -251,53 +251,192 @@
 4. Restart and confirm mode persistence.
 
 ---
+## Phase 5: WidgetSpec v1.0 + Widget Builder Engine (deterministic, no LLM)
 
-## Phase 5: WidgetSpec standardization + Widget Builder Engine (no LLM)
-
-### What the app does in this phase
-- Introduces a formal `WidgetSpec` contract.
-- All widgets are created via a Widget Builder Engine.
-- Chat input maps to widget intents using templates and rules only.
-
-### Key concepts
-- Generic widget types:
-  - timer
-  - counter
-  - tracker
-  - roi_panel
-  - table
-  - chart
-  - notes
-  - alert
-- Validation is authoritative.
-
-### Definition of Done
-- [ ] All widgets use `WidgetSpec`.
-- [ ] Invalid specs are rejected safely.
-- [ ] Existing widgets migrated.
-- [ ] Chat-driven creation works without AI.
+### Goal
+Introduce a single, versioned **WidgetSpec** contract and a deterministic **Widget Builder Engine** used for all widget creation, rendering, validation, and persistence.
 
 ---
 
-## Phase 6: Profile system + capability-based intelligence
+### What the app does in this phase
+
+1) **WidgetSpec v1.0 (authoritative contract)**
+- All widgets are defined and rendered exclusively from `WidgetSpec`.
+- Versioned schema with strict validation (Zod).
+- Stored per profile and snapshotted via Phase 4 system.
+
+2) **Widget Builder Engine (no AI)**
+- Input:
+  - user chat message
+  - current profile context
+  - current plan
+  - optional answers to previous questions
+- Output:
+  - `draftPlan` (WidgetSpec-based)
+  - `nextQuestions[]` (only missing required fields)
+- Uses templates + deterministic rules only.
+
+3) **Widget types supported (minimum set)**
+- timer
+- counter
+- tracker
+- roi_panel
+- table
+- chart
+- notes
+- alert
+
+4) **Safe calculations**
+- Declarative formulas only.
+- No JS eval.
+- Allow only numbers, + - * / ( ), and references to declared fields.
+
+5) **Migration**
+- Existing widgets/plans auto-migrate to WidgetSpec on load.
+- Legacy format removed after migration.
+
+---
+
+### Definition of Done
+- [ ] WidgetSpec v1.0 schema exists and validates all widgets.
+- [ ] All rendering uses WidgetSpec (no legacy paths).
+- [ ] Builder Engine produces deterministic plans and questions.
+- [ ] Invalid specs are rejected safely.
+- [ ] Undo/rollback works with WidgetSpec plans.
+
+---
+
+## Phase 6: Local Widget Library + Reusable Widgets
+
+### Goal
+Allow widgets to be reused across profiles via a **local widget library**, enabling future sharing and marketplace features.
+
+---
 
 ### What the app does in this phase
-- Adds profiles to reduce repeated configuration.
+
+1) **Widget Library (local, per user)**
+- Introduce `WidgetDefinition` (reusable blueprint).
+- Separate:
+  - `WidgetDefinition` (library item)
+  - `WidgetInstance` (placed in a profile plan)
+
+2) **Library capabilities**
+- Save any widget instance as a library definition.
+- Add a library widget into any profile.
+- Export / import widget definitions as JSON files.
+
+3) **Versioning & compatibility**
+- Each WidgetDefinition includes:
+  - version
+  - WidgetSpec version compatibility
+- Validation enforced on import.
+
+---
+
+### Definition of Done
+- [ ] Local widget library persists across restarts.
+- [ ] Widgets can be reused across profiles.
+- [ ] Export/import works with validation.
+- [ ] Library widgets instantiate correctly per profile.
+
+---
+
+## Phase 7: Floating Widgets & HUD Pinning (non-visual anchoring)
+
+### Goal
+Allow widgets to behave as **HUD elements** that remain visible and well-positioned during gameplay without game injection.
+
+---
+
+### What the app does in this phase
+
+1) **Pinning modes**
+- Extend WidgetSpec with `pinning`:
+  - `free` (normal overlay widget)
+  - `snap` (snap to screen or window edges)
+
+2) **Persistence**
+- Pinned widgets retain position, size, and priority per profile.
+
+3) **No vision-based anchoring yet**
+- Pinning is geometric only (edges, offsets).
+- No capture-based anchoring in this phase.
+
+---
+
+### Definition of Done
+- [ ] Widgets can be pinned/unpinned.
+- [ ] Snap-to-edge works reliably.
+- [ ] Pinned widgets persist across restarts and profile switches.
+
+---
+
+## Phase 7.5: Visual Anchoring (opt-in, capture-based, passive)
+
+### Goal
+Allow floating widgets to **visually follow game UI elements** using opt-in screen capture, without injection or memory access.
+
+---
+
+### What the app does in this phase
+
+1) **Anchor definitions**
+- User defines an anchor from a capture (small reference region).
+- Store `AnchorDefinition` per profile:
+  - image patch
+  - tolerance
+  - metadata
+
+2) **Anchor-based pinning**
+- New pinning mode: `anchor`
+- Widget position updates when anchor is detected in new captures.
+
+3) **Fallback behavior**
+- If anchor not found:
+  - fallback to last known position
+  - or snap-to-edge
+
+---
+
+### Definition of Done
+- [ ] Anchors can be created from captures.
+- [ ] Widgets follow anchors when capture is enabled.
+- [ ] Safe fallback when anchor is missing.
+- [ ] Anchoring pauses cleanly when capture is disabled.
+
+---
+
+## Phase 8: Profile system + capability-based behavior
+
+### Goal
+Reduce configuration friction by reusing profile defaults and capabilities.
+
+---
+
+### What the app does in this phase
 - Profiles store:
-  - game name (optional)
-  - currency and number format
+  - game name (informational only)
+  - currency & number format
   - daily reset time
   - enabled capabilities (manual, OCR, clipboard, logs)
-- Widget Builder reuses defaults automatically.
+- Widget Builder and rules reuse profile defaults automatically.
+
+---
 
 ### Definition of Done
 - [ ] Profiles persist and are selectable.
 - [ ] Defaults reduce follow-up questions.
-- [ ] Capability constraints enforced.
+- [ ] Capabilities are enforced consistently.
 
 ---
 
-## Phase 7: AI Mode framework (OFF by default)
+## Phase 9: AI Mode framework (OFF by default)
+
+### Goal
+Introduce AI as an **optional assistant**, never a dependency.
+
+---
 
 ### What the app does in this phase
 - Adds AI Mode setting:
@@ -305,48 +444,90 @@
   - External LLM
   - Local LLM
 - Introduces LLM adapter interface.
-- App remains fully functional with AI Mode off.
+- Core logic works fully with AI disabled.
+
+---
 
 ### Definition of Done
-- [ ] AI Mode selector exists.
 - [ ] App runs with no API key.
-- [ ] Disabled adapter works.
+- [ ] Disabled adapter is default.
 - [ ] Validation always overrides AI output.
 
 ---
 
-## Phase 8: LLM-assisted Widget Builder (optional enhancement)
+## Phase 10: LLM-assisted Widget Builder (optional)
+
+### Goal
+Use LLM only to improve intent understanding and question quality.
+
+---
 
 ### What the app does in this phase
-- Uses LLM only to:
+- LLM may:
   - disambiguate intent
-  - suggest widget structures
-  - improve question phrasing
-- Deterministic engine remains authoritative.
+  - suggest widget drafts
+  - rephrase questions
+- LLM never bypasses validation or rules.
+
+---
 
 ### Definition of Done
 - [ ] LLM called only on ambiguity.
-- [ ] Output converted to WidgetSpec drafts.
-- [ ] Invalid AI output rejected.
-- [ ] AI Mode fully optional.
+- [ ] All LLM output converted to WidgetSpec drafts.
+- [ ] Invalid output safely rejected.
 
 ---
 
-## Phase 9: Presets, templates, and UX polish
+## Phase 11: Presets, Collections, and UX polish
+
+### Goal
+Make the system fast and pleasant to use for real players.
+
+---
 
 ### What the app does in this phase
-- Adds reusable widget templates (XP/h, ROI, timers).
-- Improves auto-layout and visual grouping.
-- Polishes UX around rules, profiles, and undo.
-
-### Definition of Done
-- [ ] Templates reduce setup time.
-- [ ] Widgets align cleanly.
-- [ ] Overlay feels predictable and focused.
+- Preset widget bundles (XP, ROI, timers).
+- Collections = named sets of WidgetDefinitions.
+- Improved layout, snapping, and inspector UX.
 
 ---
 
-> Important note for contributors and Codex  
-> - Do NOT introduce LLM dependencies before Phase 7  
-> - `WidgetSpec` and validation are the core contract  
-> - AI is an assistant, never a requirement
+### Definition of Done
+- [ ] Presets reduce setup time significantly.
+- [ ] Collections apply cleanly to profiles.
+- [ ] Overlay feels predictable, minimal, and powerful.
+
+---
+
+## Phase 12: Widget Marketplace (online, optional)
+
+### Goal
+Enable sharing and discovery of widgets between users.
+
+---
+
+### What the app does in this phase
+- Online catalog of WidgetDefinitions.
+- Install/update/remove with compatibility checks.
+- Publishing flow with metadata and versioning.
+
+---
+
+### Key constraints
+- Declarative widgets only (no executable code).
+- Strict validation and compatibility enforcement.
+
+---
+
+### Definition of Done
+- [ ] Browse and install widgets from marketplace.
+- [ ] Installed widgets work across profiles.
+- [ ] Updates do not break existing plans.
+
+---
+
+> Important notes for Codex and contributors  
+> - Do NOT introduce LLM dependencies before Phase 9  
+> - WidgetSpec is the core contract  
+> - Validation and determinism always win  
+> - AI is optional, never required
