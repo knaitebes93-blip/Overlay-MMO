@@ -7,6 +7,7 @@ export type OverlaySettings = {
   captureSourceType: CaptureSourceType | null;
   captureSourceId: string | null;
   captureRoi: CaptureRoi | null;
+  llm: LlmSettings;
 };
 
 export type DisplayInfo = {
@@ -18,6 +19,85 @@ export type DisplayInfo = {
 export type OverlayPlan = {
   version: "1.0";
   widgets: OverlayWidget[];
+};
+
+export type MemoryEntry = {
+  id: string;
+  createdAt: number;
+  text: string;
+  tags?: string[];
+};
+
+export type MemoryStore = {
+  version: "1.0";
+  entries: MemoryEntry[];
+};
+
+export type RuleAction =
+  | {
+      type: "setTextWidget";
+      widgetId: string;
+      template: string;
+    }
+  | {
+      type: "incrementCounter";
+      widgetId: string;
+      amount: number;
+    }
+  | {
+      type: "trackRate";
+      widgetId: string;
+      template: string;
+      valueSource?: "match0" | "g1";
+      unit?: string;
+      precision?: number;
+      minSeconds?: number;
+    };
+
+export type Rule = {
+  id: string;
+  enabled: boolean;
+  mode: "includes" | "regex";
+  pattern: string;
+  action: RuleAction;
+  state?: {
+    lastValue?: number;
+    lastAt?: number;
+  };
+};
+
+export type RulesStore = {
+  version: "1.0";
+  rules: Rule[];
+};
+
+export type LlmProvider =
+  | "openai"
+  | "groq"
+  | "openrouter"
+  | "mistral"
+  | "ollama"
+  | "lmstudio"
+  | "custom";
+
+export type LlmSettings = {
+  enabled: boolean;
+  provider: LlmProvider;
+  baseUrl: string;
+  model: string;
+  apiKey?: string;
+};
+
+export type PlannerComposeInput = {
+  message: string;
+  plan: OverlayPlan;
+  rules: RulesStore;
+};
+
+export type PlannerComposeResult = {
+  plan: OverlayPlan;
+  rules: RulesStore;
+  note: string;
 };
 
 export type EventLogEntry = {
@@ -164,8 +244,15 @@ export type OverlayAPI = {
   setDisplay: (displayId: number) => Promise<void>;
   loadPlan: () => Promise<PlanLoadResult>;
   savePlan: (plan: OverlayPlan) => Promise<void>;
+  undoPlan: () => Promise<OverlayPlan>;
+  redoPlan: () => Promise<OverlayPlan>;
+  composePlan: (input: PlannerComposeInput) => Promise<PlannerComposeResult>;
   loadEventLog: () => Promise<EventLog>;
   saveEventLog: (log: EventLog) => Promise<void>;
+  loadMemory: () => Promise<MemoryStore>;
+  saveMemory: (store: MemoryStore) => Promise<void>;
+  loadRules: () => Promise<RulesStore>;
+  saveRules: (store: RulesStore) => Promise<void>;
   listCaptureSources: () => Promise<CaptureSource[]>;
   captureAndProcess: (target: CaptureTarget | null) => Promise<OcrResult | null>;
   captureSnapshot: (target: CaptureTarget) => Promise<CaptureSnapshotResult>;

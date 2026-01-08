@@ -2,12 +2,18 @@ import { app, BrowserWindow, ipcMain, screen, globalShortcut, nativeImage } from
 import { join } from "path";
 import {
   loadEventLog,
+  loadMemory,
   loadPlan,
+  loadRules,
   loadSettings,
+  redoPlan,
   saveCapture,
   saveEventLog,
+  saveMemory,
   savePlan,
-  saveSettings
+  saveRules,
+  saveSettings,
+  undoPlan
 } from "./storage";
 import {
   CaptureSource,
@@ -16,13 +22,17 @@ import {
   CaptureTarget,
   DisplayInfo,
   EventLog,
+  MemoryStore,
   OcrResult,
   OverlayPlan,
-  OverlaySettings
+  OverlaySettings,
+  PlannerComposeInput,
+  RulesStore
 } from "../shared/ipc";
 import { runOcr, shutdownOcrWorker } from "./ocr";
 import * as ocrPreprocess from "./ocrPreprocess";
 import { logError, logInfo } from "./logging";
+import { composeWithLlm } from "./llmComposer";
 import screenshotDesktop from "screenshot-desktop";
 import { execFile } from "child_process";
 
@@ -826,10 +836,45 @@ const registerIpc = () => {
     await savePlan(plan);
   });
 
+  ipcMain.handle("plan:undo", async (): Promise<OverlayPlan> => {
+    return undoPlan();
+  });
+
+  ipcMain.handle("plan:redo", async (): Promise<OverlayPlan> => {
+    return redoPlan();
+  });
+
+  ipcMain.handle(
+    "planner:compose",
+    async (_event, input: PlannerComposeInput) => {
+      cachedSettings = cachedSettings ?? (await loadSettings());
+      const result = await composeWithLlm(input, cachedSettings?.llm);
+      await savePlan(result.plan);
+      await saveRules(result.rules);
+      return result;
+    }
+  );
+
   ipcMain.handle("event-log:load", async () => loadEventLog());
 
   ipcMain.handle("event-log:save", async (_event, log: EventLog) => {
     await saveEventLog(log);
+  });
+
+  ipcMain.handle("memory:load", async (): Promise<MemoryStore> => {
+    return loadMemory();
+  });
+
+  ipcMain.handle("memory:save", async (_event, store: MemoryStore) => {
+    await saveMemory(store);
+  });
+
+  ipcMain.handle("rules:load", async (): Promise<RulesStore> => {
+    return loadRules();
+  });
+
+  ipcMain.handle("rules:save", async (_event, store: RulesStore) => {
+    await saveRules(store);
   });
 
   ipcMain.handle("capture:list-sources", async (): Promise<CaptureSource[]> => {

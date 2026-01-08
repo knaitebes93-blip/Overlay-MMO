@@ -1,17 +1,30 @@
 import { app } from "electron";
 import { promises as fs } from "fs";
 import { join } from "path";
-import { EventLog, OverlayPlan, OverlaySettings, PlanLoadResult } from "../shared/ipc";
+import {
+  EventLog,
+  MemoryStore,
+  OverlayPlan,
+  OverlaySettings,
+  PlanLoadResult,
+  RulesStore
+} from "../shared/ipc";
 import { eventLogSchema } from "../shared/eventLogSchema";
+import { memoryStoreSchema } from "../shared/memorySchema";
 import { overlayPlanSchema } from "../shared/planSchema";
+import { rulesStoreSchema } from "../shared/rulesSchema";
 
 const PROFILE_NAME = "default";
 const SETTINGS_FILE = "settings.json";
 const PLAN_FILE = "plan.json";
 const PLAN_LAST_GOOD_FILE = "plan.last-good.json";
+const PLAN_HISTORY_FILE = "plan.history.json";
 const EVENT_LOG_FILE = "event-log.json";
+const MEMORY_FILE = "memory.json";
+const RULES_FILE = "rules.json";
 const CAPTURE_DIR = "captures";
 const CAPTURE_MAX_FILES = 10;
+const PLAN_HISTORY_LIMIT = 20;
 
 const defaultSettings: OverlaySettings = {
   bounds: null,
@@ -21,12 +34,35 @@ const defaultSettings: OverlaySettings = {
   captureEnabled: false,
   captureSourceType: null,
   captureSourceId: null,
-  captureRoi: null
+  captureRoi: null,
+  llm: {
+    enabled: false,
+    provider: "ollama",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    model: "llama3.2:1b",
+    apiKey: ""
+  }
 };
 
 const defaultEventLog: EventLog = {
   version: "1.0",
   entries: []
+};
+
+const defaultMemory: MemoryStore = {
+  version: "1.0",
+  entries: []
+};
+
+const defaultRules: RulesStore = {
+  version: "1.0",
+  rules: []
+};
+
+type PlanHistory = {
+  version: "1.0";
+  undo: OverlayPlan[];
+  redo: OverlayPlan[];
 };
 
 const ensureProfileDir = async (): Promise<string> => {
@@ -157,8 +193,117 @@ export const savePlan = async (plan: OverlayPlan): Promise<void> => {
   }
   const dir = await ensureProfileDir();
   const payload = validation.data as OverlayPlan;
-  await writeJson(join(dir, PLAN_LAST_GOOD_FILE), payload);
-  await writeJson(join(dir, PLAN_FILE), payload);
+
+  const planPath = join(dir, PLAN_FILE);
+  const backupPath = join(dir, PLAN_LAST_GOOD_FILE);
+  const historyPath = join(dir, PLAN_HISTORY_FILE);
+
+  const readValidatedPlan = async (file: string): Promise<OverlayPlan | null> => {
+    const candidate = await readJsonUnknown(file);
+    if (candidate.data === null) {
+      return null;
+    }
+    const parsed = overlayPlanSchema.safeParse(candidate.data);
+    return parsed.success ? (parsed.data as OverlayPlan) : null;
+  };
+
+  const current = (await readValidatedPlan(planPath)) ?? (await readValidatedPlan(backupPath));
+  if (current && JSON.stringify(current) !== JSON.stringify(payload)) {
+    try {
+      const historyCandidate = await readJsonUnknown(historyPath);
+      const historyData =
+        historyCandidate.data && typeof historyCandidate.data === "object"
+          ? (historyCandidate.data as Partial<PlanHistory>)
+          : null;
+      const history: PlanHistory = {
+        version: "1.0",
+        undo: Array.isArray(historyData?.undo) ? (historyData?.undo as OverlayPlan[]) : [],
+        redo: Array.isArray(historyData?.redo) ? (historyData?.redo as OverlayPlan[]) : []
+      };
+      history.undo = [...history.undo, current].slice(-PLAN_HISTORY_LIMIT);
+      history.redo = [];
+      await writeJson(historyPath, history);
+    } catch {
+      // Ignore history failures; saving the plan should still work.
+    }
+  }
+
+  await writeJson(backupPath, payload);
+  await writeJson(planPath, payload);
+};
+
+const readPlanHistory = async (dir: string): Promise<PlanHistory> => {
+  const historyPath = join(dir, PLAN_HISTORY_FILE);
+  const candidate = await readJsonUnknown(historyPath);
+  const historyData =
+    candidate.data && typeof candidate.data === "object" ? (candidate.data as Partial<PlanHistory>) : null;
+  return {
+    version: "1.0",
+    undo: Array.isArray(historyData?.undo) ? (historyData?.undo as OverlayPlan[]) : [],
+    redo: Array.isArray(historyData?.redo) ? (historyData?.redo as OverlayPlan[]) : []
+  };
+};
+
+export const undoPlan = async (): Promise<OverlayPlan> => {
+  const dir = await ensureProfileDir();
+  const planPath = join(dir, PLAN_FILE);
+  const backupPath = join(dir, PLAN_LAST_GOOD_FILE);
+
+  const candidate = await readJsonUnknown(planPath);
+  const currentValidation = overlayPlanSchema.safeParse(candidate.data);
+  if (!currentValidation.success) {
+    throw new Error("No valid plan to undo.");
+  }
+  const current = currentValidation.data as OverlayPlan;
+
+  const history = await readPlanHistory(dir);
+  if (history.undo.length === 0) {
+    throw new Error("Nothing to undo.");
+  }
+  const nextRaw = history.undo[history.undo.length - 1];
+  const nextValidation = overlayPlanSchema.safeParse(nextRaw);
+  if (!nextValidation.success) {
+    throw new Error("Undo history contains an invalid plan.");
+  }
+
+  history.undo = history.undo.slice(0, -1);
+  history.redo = [...history.redo, current].slice(-PLAN_HISTORY_LIMIT);
+
+  await writeJson(join(dir, PLAN_HISTORY_FILE), history);
+  await writeJson(backupPath, nextValidation.data as OverlayPlan);
+  await writeJson(planPath, nextValidation.data as OverlayPlan);
+  return nextValidation.data as OverlayPlan;
+};
+
+export const redoPlan = async (): Promise<OverlayPlan> => {
+  const dir = await ensureProfileDir();
+  const planPath = join(dir, PLAN_FILE);
+  const backupPath = join(dir, PLAN_LAST_GOOD_FILE);
+
+  const candidate = await readJsonUnknown(planPath);
+  const currentValidation = overlayPlanSchema.safeParse(candidate.data);
+  if (!currentValidation.success) {
+    throw new Error("No valid plan to redo.");
+  }
+  const current = currentValidation.data as OverlayPlan;
+
+  const history = await readPlanHistory(dir);
+  if (history.redo.length === 0) {
+    throw new Error("Nothing to redo.");
+  }
+  const nextRaw = history.redo[history.redo.length - 1];
+  const nextValidation = overlayPlanSchema.safeParse(nextRaw);
+  if (!nextValidation.success) {
+    throw new Error("Redo history contains an invalid plan.");
+  }
+
+  history.redo = history.redo.slice(0, -1);
+  history.undo = [...history.undo, current].slice(-PLAN_HISTORY_LIMIT);
+
+  await writeJson(join(dir, PLAN_HISTORY_FILE), history);
+  await writeJson(backupPath, nextValidation.data as OverlayPlan);
+  await writeJson(planPath, nextValidation.data as OverlayPlan);
+  return nextValidation.data as OverlayPlan;
 };
 
 export const loadEventLog = async (): Promise<EventLog> => {
@@ -185,6 +330,58 @@ export const saveEventLog = async (log: EventLog): Promise<void> => {
   }
   const dir = await ensureProfileDir();
   await writeJson(join(dir, EVENT_LOG_FILE), validation.data as EventLog);
+};
+
+export const loadMemory = async (): Promise<MemoryStore> => {
+  const dir = await ensureProfileDir();
+  const path = join(dir, MEMORY_FILE);
+  const candidate = await readJsonUnknown(path);
+  if (candidate.data !== null) {
+    const validation = memoryStoreSchema.safeParse(candidate.data);
+    if (validation.success) {
+      return validation.data as MemoryStore;
+    }
+  }
+  return defaultMemory;
+};
+
+export const saveMemory = async (store: MemoryStore): Promise<void> => {
+  const validation = memoryStoreSchema.safeParse(store);
+  if (!validation.success) {
+    throw new Error(
+      `Refusing to save invalid memory store: ${validation.error.errors
+        .map((err) => err.message)
+        .join("; ")}`
+    );
+  }
+  const dir = await ensureProfileDir();
+  await writeJson(join(dir, MEMORY_FILE), validation.data as MemoryStore);
+};
+
+export const loadRules = async (): Promise<RulesStore> => {
+  const dir = await ensureProfileDir();
+  const path = join(dir, RULES_FILE);
+  const candidate = await readJsonUnknown(path);
+  if (candidate.data !== null) {
+    const validation = rulesStoreSchema.safeParse(candidate.data);
+    if (validation.success) {
+      return validation.data as RulesStore;
+    }
+  }
+  return defaultRules;
+};
+
+export const saveRules = async (store: RulesStore): Promise<void> => {
+  const validation = rulesStoreSchema.safeParse(store);
+  if (!validation.success) {
+    throw new Error(
+      `Refusing to save invalid rules store: ${validation.error.errors
+        .map((err) => err.message)
+        .join("; ")}`
+    );
+  }
+  const dir = await ensureProfileDir();
+  await writeJson(join(dir, RULES_FILE), validation.data as RulesStore);
 };
 
 export const saveCapture = async (

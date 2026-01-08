@@ -3,9 +3,13 @@ import {
   CaptureSnapshotResult,
   CaptureTarget,
   EventLog,
+  MemoryStore,
   OverlayAPI,
   OverlayPlan,
-  OverlaySettings
+  OverlaySettings,
+  PlannerComposeInput,
+  PlannerComposeResult,
+  RulesStore
 } from "../shared/ipc";
 
 const formatError = (error: unknown) => {
@@ -29,8 +33,16 @@ const api: OverlayAPI = {
   setDisplay: (displayId: number) => ipcRenderer.invoke("app:set-display", displayId),
   loadPlan: () => ipcRenderer.invoke("plan:load"),
   savePlan: (plan: OverlayPlan) => ipcRenderer.invoke("plan:save", plan),
+  undoPlan: () => ipcRenderer.invoke("plan:undo"),
+  redoPlan: () => ipcRenderer.invoke("plan:redo"),
+  composePlan: (input: PlannerComposeInput): Promise<PlannerComposeResult> =>
+    ipcRenderer.invoke("planner:compose", input),
   loadEventLog: () => ipcRenderer.invoke("event-log:load"),
   saveEventLog: (log: EventLog) => ipcRenderer.invoke("event-log:save", log),
+  loadMemory: () => ipcRenderer.invoke("memory:load"),
+  saveMemory: (store: MemoryStore) => ipcRenderer.invoke("memory:save", store),
+  loadRules: () => ipcRenderer.invoke("rules:load"),
+  saveRules: (store: RulesStore) => ipcRenderer.invoke("rules:save", store),
   listCaptureSources: async () => {
     try {
       return await ipcRenderer.invoke("capture:list-sources");

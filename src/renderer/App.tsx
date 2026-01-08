@@ -4,11 +4,19 @@ import {
   CaptureSnapshotResult,
   CaptureSource,
   CaptureSourceType,
+  CounterWidget,
   DisplayInfo,
   EventLog,
   EventLogEntry,
+  LlmProvider,
+  LlmSettings,
+  MemoryEntry,
+  MemoryStore,
   OverlayPlan,
   OverlaySettings,
+  Rule,
+  RulesStore,
+  TextWidget,
   OverlayWidget
 } from "../shared/ipc";
 import { overlayPlanSchema } from "../shared/planSchema";
@@ -23,7 +31,14 @@ const fallbackSettings: OverlaySettings = {
   captureEnabled: false,
   captureSourceType: null,
   captureSourceId: null,
-  captureRoi: null
+  captureRoi: null,
+  llm: {
+    enabled: false,
+    provider: "ollama",
+    baseUrl: "http://127.0.0.1:11434/v1",
+    model: "llama3.2:1b",
+    apiKey: ""
+  }
 };
 
 const CAPTURE_INTERVAL_MS = 15000;
@@ -31,6 +46,21 @@ const OCR_TEXT_LIMIT = 2000;
 const OCR_PREVIEW_LIMIT = 140;
 
 const emptyEventLog: EventLog = { version: "1.0", entries: [] };
+const emptyMemory: MemoryStore = { version: "1.0", entries: [] };
+const emptyRules: RulesStore = { version: "1.0", rules: [] };
+
+const llmDefaults: Record<LlmProvider, { baseUrl: string; model: string; apiKey?: string }> = {
+  openai: { baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+  groq: { baseUrl: "https://api.groq.com/openai/v1", model: "llama-3.1-8b-instant" },
+  openrouter: {
+    baseUrl: "https://openrouter.ai/api/v1",
+    model: "meta-llama/llama-3.1-8b-instruct:free"
+  },
+  mistral: { baseUrl: "https://api.mistral.ai/v1", model: "mistral-small-latest" },
+  ollama: { baseUrl: "http://127.0.0.1:11434/v1", model: "llama3.2:1b" },
+  lmstudio: { baseUrl: "http://localhost:1234/v1", model: "local-model" },
+  custom: { baseUrl: "", model: "" }
+};
 
 const updateWidgetById = (
   widgets: OverlayWidget[],
@@ -55,6 +85,69 @@ const buildEntryId = () => {
   return `event-${Date.now()}-${suffix}`;
 };
 
+const buildRuleId = () => {
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `rule-${Date.now()}-${suffix}`;
+};
+
+const buildMemoryId = () => {
+  const suffix = Math.random().toString(36).slice(2, 8);
+  return `mem-${Date.now()}-${suffix}`;
+};
+
+const flattenWidgets = (widgets: OverlayWidget[]): OverlayWidget[] => {
+  const result: OverlayWidget[] = [];
+  const visit = (widget: OverlayWidget) => {
+    result.push(widget);
+    if (widget.type === "panel") {
+      widget.children.forEach(visit);
+    }
+  };
+  widgets.forEach(visit);
+  return result;
+};
+
+const plansEqual = (a: OverlayPlan | null, b: OverlayPlan | null) =>
+  Boolean(a && b && JSON.stringify(a) === JSON.stringify(b));
+
+const parseNumericValue = (raw: string): number | null => {
+  const cleaned = raw.replace(/[^0-9,.-]/g, "");
+  if (!cleaned) {
+    return null;
+  }
+  const hasComma = cleaned.includes(",");
+  const hasDot = cleaned.includes(".");
+  let normalized = cleaned;
+  if (hasComma && hasDot) {
+    const lastComma = cleaned.lastIndexOf(",");
+    const lastDot = cleaned.lastIndexOf(".");
+    const decimalIndex = Math.max(lastComma, lastDot);
+    const integerPart = cleaned.slice(0, decimalIndex).replace(/[.,]/g, "");
+    const decimalPart = cleaned.slice(decimalIndex + 1);
+    normalized = `${integerPart}.${decimalPart}`;
+  } else if (hasComma || hasDot) {
+    const sep = hasComma ? "," : ".";
+    const parts = cleaned.split(sep);
+    const last = parts[parts.length - 1] ?? "";
+    if (last.length === 3 && parts.length > 1) {
+      normalized = parts.join("");
+    } else {
+      normalized = `${parts.slice(0, -1).join("")}.${last}`;
+    }
+  }
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+};
+
+const formatRateTemplate = (template: string, rate: number, unit: string, value: number, precision: number) => {
+  const rateText = rate.toFixed(precision);
+  const valueText = value.toFixed(precision);
+  return template
+    .replace(/\$\{rate\}/g, rateText)
+    .replace(/\$\{unit\}/g, unit)
+    .replace(/\$\{value\}/g, valueText);
+};
+
 const normalizeOcrText = (text: string) => text.replace(/\s+/g, " ").trim();
 
 const buildOcrPreview = (text: string) => {
@@ -76,6 +169,18 @@ const App = () => {
   const [planWarning, setPlanWarning] = useState<string | null>(null);
   const [eventLog, setEventLog] = useState<EventLog>(emptyEventLog);
   const [eventLogError, setEventLogError] = useState<string | null>(null);
+  const [memoryStore, setMemoryStore] = useState<MemoryStore>(emptyMemory);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [memoryInput, setMemoryInput] = useState("");
+  const [rulesStore, setRulesStore] = useState<RulesStore>(emptyRules);
+  const [rulesError, setRulesError] = useState<string | null>(null);
+  const [llmError, setLlmError] = useState<string | null>(null);
+  const [ruleMode, setRuleMode] = useState<Rule["mode"]>("includes");
+  const [rulePattern, setRulePattern] = useState("");
+  const [ruleActionType, setRuleActionType] = useState<Rule["action"]["type"]>("setTextWidget");
+  const [ruleWidgetId, setRuleWidgetId] = useState("");
+  const [ruleTemplate, setRuleTemplate] = useState("${text}");
+  const [ruleAmount, setRuleAmount] = useState(1);
   const [captureStatus, setCaptureStatus] = useState("Capture off.");
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [captureSources, setCaptureSources] = useState<CaptureSource[]>([]);
@@ -197,6 +302,34 @@ const App = () => {
         setEventLog(emptyEventLog);
         setEventLogError("Event log API not available. Restart Electron to load updated IPC handlers.");
       }
+
+      if (typeof overlayAPI.loadMemory === "function") {
+        try {
+          const loadedMemory = await overlayAPI.loadMemory();
+          setMemoryStore(loadedMemory);
+          setMemoryError(null);
+        } catch (error: unknown) {
+          setMemoryStore(emptyMemory);
+          setMemoryError(error instanceof Error ? error.message : "Failed to load memory.");
+        }
+      } else {
+        setMemoryStore(emptyMemory);
+        setMemoryError("Memory API not available. Restart Electron to load updated IPC handlers.");
+      }
+
+      if (typeof overlayAPI.loadRules === "function") {
+        try {
+          const loadedRules = await overlayAPI.loadRules();
+          setRulesStore(loadedRules);
+          setRulesError(null);
+        } catch (error: unknown) {
+          setRulesStore(emptyRules);
+          setRulesError(error instanceof Error ? error.message : "Failed to load rules.");
+        }
+      } else {
+        setRulesStore(emptyRules);
+        setRulesError("Rules API not available. Restart Electron to load updated IPC handlers.");
+      }
     };
     bootstrap().catch((error: unknown) => {
       setSettings(fallbackSettings);
@@ -247,6 +380,52 @@ const App = () => {
       return;
     }
     await overlayAPI.saveSettings(next);
+  };
+
+  const updateLlmSettings = (next: Partial<LlmSettings>) => {
+    if (!settings) {
+      return;
+    }
+    saveSettings({ ...settings, llm: { ...settings.llm, ...next } });
+  };
+
+  const handleLlmProviderChange = (provider: LlmProvider) => {
+    const defaults = llmDefaults[provider];
+    updateLlmSettings({
+      provider,
+      baseUrl: defaults.baseUrl,
+      model: defaults.model
+    });
+  };
+
+  const handleUndoPlan = async () => {
+    if (!overlayAPI || typeof overlayAPI.undoPlan !== "function") {
+      setPlanError("Undo API not available. Restart Electron.");
+      return;
+    }
+    try {
+      const next = await overlayAPI.undoPlan();
+      setPlan(next);
+      setLastValidPlan(next);
+      setPlanError(null);
+    } catch (error: unknown) {
+      setPlanError(error instanceof Error ? error.message : "Undo failed.");
+    }
+  };
+
+  const handleRedoPlan = async () => {
+    if (!overlayAPI || typeof overlayAPI.redoPlan !== "function") {
+      setPlanError("Redo API not available. Restart Electron.");
+      return;
+    }
+    try {
+      const next = await overlayAPI.redoPlan();
+      setPlan(next);
+      setLastValidPlan(next);
+      setPlanError(null);
+    } catch (error: unknown) {
+      setPlanError(error instanceof Error ? error.message : "Redo failed.");
+    }
   };
 
   const handleOpacityChange = (value: number) => {
@@ -468,6 +647,38 @@ const App = () => {
     }
   }, [overlayAPI]);
 
+  const persistMemory = useCallback(
+    async (next: MemoryStore) => {
+      if (!overlayAPI || typeof overlayAPI.saveMemory !== "function") {
+        setMemoryError("Memory API not available. Restart Electron to load updated IPC handlers.");
+        return;
+      }
+      try {
+        await overlayAPI.saveMemory(next);
+        setMemoryError(null);
+      } catch (error: unknown) {
+        setMemoryError(error instanceof Error ? error.message : "Failed to save memory.");
+      }
+    },
+    [overlayAPI]
+  );
+
+  const persistRules = useCallback(
+    async (next: RulesStore) => {
+      if (!overlayAPI || typeof overlayAPI.saveRules !== "function") {
+        setRulesError("Rules API not available. Restart Electron to load updated IPC handlers.");
+        return;
+      }
+      try {
+        await overlayAPI.saveRules(next);
+        setRulesError(null);
+      } catch (error: unknown) {
+        setRulesError(error instanceof Error ? error.message : "Failed to save rules.");
+      }
+    },
+    [overlayAPI]
+  );
+
   const handleAddEventEntry = useCallback((entry: EventLogEntry) => {
     setEventLog((prev) => {
       const next = { ...prev, entries: [...prev.entries, entry] };
@@ -475,6 +686,294 @@ const App = () => {
       return next;
     });
   }, [persistEventLog]);
+
+  const handleAddMemoryEntry = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) {
+        return;
+      }
+      const entry: MemoryEntry = { id: buildMemoryId(), createdAt: Date.now(), text: trimmed };
+      setMemoryStore((prev) => {
+        const next = { ...prev, entries: [entry, ...prev.entries].slice(0, 200) };
+        persistMemory(next).catch(() => undefined);
+        return next;
+      });
+    },
+    [persistMemory]
+  );
+
+  const handleDeleteMemoryEntry = useCallback(
+    (id: string) => {
+      setMemoryStore((prev) => {
+        const next = { ...prev, entries: prev.entries.filter((entry) => entry.id !== id) };
+        persistMemory(next).catch(() => undefined);
+        return next;
+      });
+    },
+    [persistMemory]
+  );
+
+  const validateRule = (rule: Rule) => {
+    if (!rule.pattern.trim()) {
+      return "Pattern is required.";
+    }
+    if (!rule.action.widgetId.trim()) {
+      return "Select a widget.";
+    }
+    if (rule.mode === "regex") {
+      try {
+        new RegExp(rule.pattern, "i");
+      } catch (error: unknown) {
+        return error instanceof Error ? error.message : "Invalid regex pattern.";
+      }
+    }
+    if (rule.action.type === "setTextWidget" && !rule.action.template.trim()) {
+      return "Template is required.";
+    }
+    return null;
+  };
+
+  const handleAddRule = useCallback(() => {
+    const nextRule: Rule =
+      ruleActionType === "incrementCounter"
+        ? {
+            id: buildRuleId(),
+            enabled: true,
+            mode: ruleMode,
+            pattern: rulePattern,
+            action: { type: "incrementCounter", widgetId: ruleWidgetId, amount: ruleAmount }
+          }
+        : {
+            id: buildRuleId(),
+            enabled: true,
+            mode: ruleMode,
+            pattern: rulePattern,
+            action: { type: "setTextWidget", widgetId: ruleWidgetId, template: ruleTemplate }
+          };
+
+    const validationError = validateRule(nextRule);
+    if (validationError) {
+      setRulesError(validationError);
+      return;
+    }
+
+    setRulesStore((prev) => {
+      const next = { ...prev, rules: [nextRule, ...prev.rules] };
+      persistRules(next).catch(() => undefined);
+      return next;
+    });
+    setRulePattern("");
+    setRulesError(null);
+  }, [
+    persistRules,
+    ruleActionType,
+    ruleAmount,
+    ruleMode,
+    rulePattern,
+    ruleTemplate,
+    ruleWidgetId
+  ]);
+
+  const handleToggleRule = useCallback(
+    (id: string) => {
+      setRulesStore((prev) => {
+        const next = {
+          ...prev,
+          rules: prev.rules.map((rule) =>
+            rule.id === id ? { ...rule, enabled: !rule.enabled } : rule
+          )
+        };
+        persistRules(next).catch(() => undefined);
+        return next;
+      });
+    },
+    [persistRules]
+  );
+
+  const handleDeleteRule = useCallback(
+    (id: string) => {
+      setRulesStore((prev) => {
+        const next = { ...prev, rules: prev.rules.filter((rule) => rule.id !== id) };
+        persistRules(next).catch(() => undefined);
+        return next;
+      });
+    },
+    [persistRules]
+  );
+
+  const applyRulesFromOcr = useCallback(
+    async (ocrText: string, capturedAt: number) => {
+      if (!plan || !overlayAPI || typeof overlayAPI.savePlan !== "function") {
+        return;
+      }
+      const passiveText = normalizeOcrText(ocrText);
+      if (!passiveText) {
+        return;
+      }
+      const enabledRules = rulesStore.rules.filter((rule) => rule.enabled);
+      if (enabledRules.length === 0) {
+        return;
+      }
+
+      const interpolate = (template: string, match0: string, groups: string[]) => {
+        return template
+          .replace(/\$\{text\}/g, passiveText)
+          .replace(/\$\{match0\}/g, match0)
+          .replace(/\$\{g(\d+)\}/g, (_whole, index: string) => {
+            const i = Number(index);
+            if (!Number.isFinite(i) || i <= 0) {
+              return "";
+            }
+            return groups[i - 1] ?? "";
+          });
+      };
+
+      const findWidgetById = (widgets: OverlayWidget[], id: string): OverlayWidget | undefined => {
+        for (const widget of widgets) {
+          if (widget.id === id) {
+            return widget;
+          }
+          if (widget.type === "panel") {
+            const child = findWidgetById(widget.children, id);
+            if (child) {
+              return child;
+            }
+          }
+        }
+        return undefined;
+      };
+
+      let nextPlan: OverlayPlan = plan;
+      const fired: Rule[] = [];
+      let rulesChanged = false;
+
+      const updatedRules = rulesStore.rules.map((rule) => {
+        if (!rule.enabled) {
+          return rule;
+        }
+
+        let match0 = "";
+        let groups: string[] = [];
+
+        if (rule.mode === "includes") {
+          if (!passiveText.toLowerCase().includes(rule.pattern.toLowerCase())) {
+            return rule;
+          }
+          match0 = rule.pattern;
+        } else {
+          let regex: RegExp;
+          try {
+            regex = new RegExp(rule.pattern, "i");
+          } catch {
+            return rule;
+          }
+          const match = regex.exec(passiveText);
+          if (!match) {
+            return rule;
+          }
+          match0 = match[0] ?? "";
+          groups = match.slice(1).map((value) => value ?? "");
+        }
+
+        const target = findWidgetById(nextPlan.widgets, rule.action.widgetId);
+        if (!target) {
+          return rule;
+        }
+
+        if (rule.action.type === "setTextWidget" && target.type === "text") {
+          const updated: TextWidget = {
+            ...target,
+            text: interpolate(rule.action.template, match0, groups)
+          };
+          nextPlan = { ...nextPlan, widgets: updateWidgetById(nextPlan.widgets, updated) };
+          fired.push(rule);
+          return rule;
+        }
+
+        if (rule.action.type === "incrementCounter" && target.type === "counter") {
+          const updated: CounterWidget = {
+            ...target,
+            value: target.value + rule.action.amount
+          };
+          nextPlan = { ...nextPlan, widgets: updateWidgetById(nextPlan.widgets, updated) };
+          fired.push(rule);
+          return rule;
+        }
+
+        if (rule.action.type === "trackRate" && target.type === "text") {
+          const valueSource = rule.action.valueSource ?? "match0";
+          const valueRaw = valueSource === "g1" ? groups[0] ?? match0 : match0;
+          const currentValue = parseNumericValue(valueRaw);
+          if (currentValue === null) {
+            return rule;
+          }
+
+          const previousValue = rule.state?.lastValue;
+          const previousAt = rule.state?.lastAt;
+          const minSeconds = rule.action.minSeconds ?? 60;
+          const precision = rule.action.precision ?? 2;
+          const unit = rule.action.unit ?? "";
+
+          if (previousValue !== undefined && previousAt !== undefined) {
+            const deltaMs = capturedAt - previousAt;
+            if (deltaMs >= minSeconds * 1000 && deltaMs > 0) {
+              const rate = (currentValue - previousValue) / (deltaMs / 3600000);
+              const text = formatRateTemplate(
+                rule.action.template,
+                rate,
+                unit,
+                currentValue,
+                precision
+              );
+              const updated: TextWidget = { ...target, text };
+              nextPlan = { ...nextPlan, widgets: updateWidgetById(nextPlan.widgets, updated) };
+              fired.push(rule);
+            }
+          }
+
+          const nextState = { lastValue: currentValue, lastAt: capturedAt };
+          const stateChanged =
+            rule.state?.lastValue !== nextState.lastValue || rule.state?.lastAt !== nextState.lastAt;
+          if (!stateChanged) {
+            return rule;
+          }
+          rulesChanged = true;
+          return { ...rule, state: nextState };
+        }
+
+        return rule;
+      });
+
+      if (rulesChanged) {
+        const nextRulesStore = { ...rulesStore, rules: updatedRules };
+        setRulesStore(nextRulesStore);
+        persistRules(nextRulesStore).catch(() => undefined);
+      }
+
+      if (!fired.length || plansEqual(plan, nextPlan)) {
+        return;
+      }
+
+      try {
+        await overlayAPI.savePlan(nextPlan);
+        setPlan(nextPlan);
+        setLastValidPlan(nextPlan);
+
+        const entry: EventLogEntry = {
+          id: buildEntryId(),
+          eventType: "rule",
+          timestamp: capturedAt,
+          note: `Rules fired: ${fired.map((rule) => rule.id).join(", ")}`,
+          data: { text: passiveText, capturedAt }
+        };
+        handleAddEventEntry(entry);
+      } catch {
+        // If save fails, don't surface it as OCR error.
+      }
+    },
+    [handleAddEventEntry, overlayAPI, persistRules, plan, rulesStore]
+  );
 
   const captureOnce = useCallback(
     async (target: { id: string; type: CaptureSourceType } | null) => {
@@ -522,6 +1021,7 @@ const App = () => {
           }
         };
         handleAddEventEntry(entry);
+        applyRulesFromOcr(result.text, result.capturedAt).catch(() => undefined);
       } catch (error: unknown) {
         const detail =
           error instanceof Error
@@ -536,7 +1036,7 @@ const App = () => {
         captureInFlightRef.current = false;
       }
     },
-    [handleAddEventEntry, overlayAPI]
+    [applyRulesFromOcr, handleAddEventEntry, overlayAPI]
   );
 
   useEffect(() => {
@@ -583,6 +1083,89 @@ const App = () => {
     () => captureSources.filter((source) => source.type === "window"),
     [captureSources]
   );
+  const flatWidgets = useMemo(
+    () => (activePlan ? flattenWidgets(activePlan.widgets) : []),
+    [activePlan]
+  );
+  const textWidgets = useMemo(
+    () => flatWidgets.filter((widget) => widget.type === "text") as TextWidget[],
+    [flatWidgets]
+  );
+  const counterWidgets = useMemo(
+    () => flatWidgets.filter((widget) => widget.type === "counter") as CounterWidget[],
+    [flatWidgets]
+  );
+  const llmHelp = useMemo(() => {
+    const provider = settings?.llm.provider ?? "ollama";
+    if (provider === "ollama") {
+      return (
+        <div className="llm-help">
+          <p>Local setup (Ollama):</p>
+          <ol>
+            <li>Install: https://ollama.com/download</li>
+            <li>Run: <code>ollama run llama3.2:1b</code></li>
+            <li>Base URL: <code>http://127.0.0.1:11434/v1</code></li>
+            <li>Enable LLM Composer.</li>
+          </ol>
+        </div>
+      );
+    }
+    if (provider === "lmstudio") {
+      return (
+        <div className="llm-help">
+          <p>Local setup (LM Studio):</p>
+          <ol>
+            <li>Install: https://lmstudio.ai</li>
+            <li>Download a small model (1B/3B).</li>
+            <li>Start the OpenAI-compatible server.</li>
+            <li>Base URL: <code>http://localhost:1234/v1</code></li>
+          </ol>
+        </div>
+      );
+    }
+    if (provider === "openrouter") {
+      return (
+        <div className="llm-help">
+          <p>OpenRouter setup:</p>
+          <ol>
+            <li>Enter your API key.</li>
+            <li>Pick a valid model from openrouter.ai/models.</li>
+          </ol>
+        </div>
+      );
+    }
+    if (provider === "groq") {
+      return (
+        <div className="llm-help">
+          <p>Groq setup:</p>
+          <ol>
+            <li>Enter your API key.</li>
+            <li>Model example: <code>llama-3.1-8b-instant</code></li>
+          </ol>
+        </div>
+      );
+    }
+    if (provider === "mistral" || provider === "openai") {
+      return (
+        <div className="llm-help">
+          <p>Cloud setup:</p>
+          <ol>
+            <li>Enter your API key.</li>
+            <li>Make sure your account has credits.</li>
+          </ol>
+        </div>
+      );
+    }
+    return (
+      <div className="llm-help">
+        <p>Custom provider:</p>
+        <ol>
+          <li>Set Base URL and Model.</li>
+          <li>API key is required for hosted providers.</li>
+        </ol>
+      </div>
+    );
+  }, [settings?.llm.provider]);
   const captureSourceValue =
     settings?.captureSourceId && settings?.captureSourceType
       ? `${settings.captureSourceType}:${settings.captureSourceId}`
@@ -590,12 +1173,55 @@ const App = () => {
 
   const handleChatSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!plan) {
+    const trimmed = chatInput.trim();
+    if (!plan || !trimmed) {
       return;
     }
-    const result = plannerStub(chatInput, plan);
-    setPlannerNote(result.note);
     setChatInput("");
+
+    if (trimmed.toLowerCase() === "reset") {
+      const resetPlan = defaultPlanMemo;
+      setPlan(resetPlan);
+      setLastValidPlan(resetPlan);
+      setPlanError(null);
+      setPlanWarning(null);
+      setRulesStore(emptyRules);
+      setLlmError(null);
+      setPlannerNote("Plan reset to defaults.");
+      if (overlayAPI) {
+        await overlayAPI.savePlan(resetPlan);
+        await overlayAPI.saveRules(emptyRules);
+      }
+      return;
+    }
+
+    if (settings?.llm.enabled && overlayAPI && typeof overlayAPI.composePlan === "function") {
+      try {
+        const result = await overlayAPI.composePlan({
+          message: trimmed,
+          plan: plan ?? defaultPlanMemo,
+          rules: rulesStore
+        });
+        setPlannerNote(result.note || "Planner updated the plan.");
+        setPlan(result.plan);
+        setLastValidPlan(result.plan);
+        setRulesStore(result.rules);
+        setPlanError(null);
+        setPlanWarning(null);
+        setLlmError(null);
+        return;
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error ? error.message : "Planner request failed.";
+        setPlannerNote(message);
+        setLlmError(message);
+        return;
+      }
+    }
+
+    const result = plannerStub(trimmed, plan);
+    setPlannerNote(result.note);
+    setLlmError(null);
     const validation = overlayPlanSchema.safeParse(result.plan);
     if (validation.success) {
       setPlan(result.plan);
@@ -628,6 +1254,17 @@ const App = () => {
           <button type="button" onClick={handleClickThroughToggle}>
             {settings?.clickThrough ? "Unlock (Interactive)" : "Lock (Click-through)"}
           </button>
+          <div className="control-group">
+            <span className="label">Plan</span>
+            <div className="plan-buttons">
+              <button type="button" onClick={handleUndoPlan}>
+                Undo
+              </button>
+              <button type="button" onClick={handleRedoPlan}>
+                Redo
+              </button>
+            </div>
+          </div>
           <div className="control-group">
             <span className="label">Display</span>
             <select value={settings?.displayId ?? ""} onChange={handleDisplayChange}>
@@ -699,6 +1336,63 @@ const App = () => {
               <li><strong>text: ...</strong> - create a text-only plan</li>
             </ul>
           </div>
+          <div className="llm-panel">
+            <h3>AI Provider</h3>
+            <label className="llm-toggle">
+              <input
+                type="checkbox"
+                checked={settings?.llm.enabled ?? false}
+                onChange={(event) => updateLlmSettings({ enabled: event.target.checked })}
+              />
+              <span>Enable LLM Composer</span>
+            </label>
+            {llmError && <p className="capture-error">{llmError}</p>}
+            <div className="llm-form">
+              <select
+                value={settings?.llm.provider ?? "ollama"}
+                onChange={(event) => handleLlmProviderChange(event.target.value as LlmProvider)}
+              >
+                <option value="ollama">Ollama (local)</option>
+                <option value="lmstudio">LM Studio (local)</option>
+                <option value="openai">OpenAI</option>
+                <option value="groq">Groq</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="mistral">Mistral</option>
+                <option value="custom">Custom</option>
+              </select>
+              <input
+                value={settings?.llm.baseUrl ?? ""}
+                onChange={(event) => updateLlmSettings({ baseUrl: event.target.value })}
+                placeholder="Base URL"
+              />
+              <input
+                value={settings?.llm.model ?? ""}
+                onChange={(event) => updateLlmSettings({ model: event.target.value })}
+                placeholder="Model"
+              />
+              <input
+                type="password"
+                value={settings?.llm.apiKey ?? ""}
+                onChange={(event) => updateLlmSettings({ apiKey: event.target.value })}
+                placeholder="API key (optional for local)"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const provider = settings?.llm.provider ?? "ollama";
+                  const defaults = llmDefaults[provider];
+                  updateLlmSettings({
+                    baseUrl: defaults.baseUrl,
+                    model: defaults.model,
+                    apiKey: defaults.apiKey ?? ""
+                  });
+                }}
+              >
+                Use defaults
+              </button>
+            </div>
+            {llmHelp}
+          </div>
           <div className="capture-panel">
             <h3>Capture OCR</h3>
             <p className="capture-status">{captureStatus}</p>
@@ -755,6 +1449,116 @@ const App = () => {
               </select>
               {captureSourcesError && <p className="capture-error">{captureSourcesError}</p>}
             </div>
+          </div>
+
+          <div className="memory-panel">
+            <h3>Memory</h3>
+            {memoryError && <p className="capture-error">{memoryError}</p>}
+            <div className="memory-form">
+              <input
+                value={memoryInput}
+                onChange={(event) => setMemoryInput(event.target.value)}
+                placeholder="Add a note (e.g., boss mechanic, reminder...)"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  handleAddMemoryEntry(memoryInput);
+                  setMemoryInput("");
+                }}
+              >
+                Add
+              </button>
+            </div>
+            <ul className="memory-list">
+              {memoryStore.entries.slice(0, 20).map((entry) => (
+                <li key={entry.id}>
+                  <span className="memory-time">{formatCaptureTime(entry.createdAt)}</span>
+                  <span className="memory-text">{entry.text}</span>
+                  <button type="button" onClick={() => handleDeleteMemoryEntry(entry.id)}>
+                    Delete
+                  </button>
+                </li>
+              ))}
+              {memoryStore.entries.length === 0 && (
+                <li className="memory-empty">No memory entries yet.</li>
+              )}
+            </ul>
+          </div>
+
+          <div className="rules-panel">
+            <h3>Rules (Passive)</h3>
+            {rulesError && <p className="capture-error">{rulesError}</p>}
+            <div className="rules-form">
+              <select value={ruleMode} onChange={(e) => setRuleMode(e.target.value as Rule["mode"])}>
+                <option value="includes">Includes</option>
+                <option value="regex">Regex</option>
+              </select>
+              <input
+                value={rulePattern}
+                onChange={(e) => setRulePattern(e.target.value)}
+                placeholder={ruleMode === "regex" ? "Pattern (regex)" : "Text to match"}
+              />
+              <select
+                value={ruleActionType}
+                onChange={(e) =>
+                  setRuleActionType(e.target.value as Rule["action"]["type"])
+                }
+              >
+                <option value="setTextWidget">Set Text Widget</option>
+                <option value="incrementCounter">Increment Counter</option>
+              </select>
+              <select value={ruleWidgetId} onChange={(e) => setRuleWidgetId(e.target.value)}>
+                <option value="" disabled>
+                  Choose widget
+                </option>
+                {(ruleActionType === "setTextWidget" ? textWidgets : counterWidgets).map((widget) => (
+                  <option key={widget.id} value={widget.id}>
+                    {widget.title ? `${widget.title} (${widget.id})` : widget.id}
+                  </option>
+                ))}
+              </select>
+              {ruleActionType === "setTextWidget" ? (
+                <input
+                  value={ruleTemplate}
+                  onChange={(e) => setRuleTemplate(e.target.value)}
+                  placeholder="Template (use ${text}, ${match0}, ${g1}...)"
+                />
+              ) : (
+                <input
+                  type="number"
+                  value={ruleAmount}
+                  onChange={(e) => setRuleAmount(Number(e.target.value))}
+                />
+              )}
+              <button type="button" onClick={handleAddRule}>
+                Add Rule
+              </button>
+            </div>
+
+            <ul className="rules-list">
+              {rulesStore.rules.map((rule) => (
+                <li key={rule.id}>
+                  <label className="rules-toggle">
+                    <input
+                      type="checkbox"
+                      checked={rule.enabled}
+                      onChange={() => handleToggleRule(rule.id)}
+                    />
+                    <span>{rule.id}</span>
+                  </label>
+                  <span className="rules-desc">
+                    {rule.mode}:{rule.pattern} → {rule.action.type} ({rule.action.widgetId}
+                    {rule.action.type === "trackRate" ? `, ${rule.action.template}` : ""}
+                    )
+                  </span>
+                  <button type="button" onClick={() => handleDeleteRule(rule.id)}>
+                    Delete
+                  </button>
+                </li>
+              ))}
+              {rulesStore.rules.length === 0 && <li className="rules-empty">No rules yet.</li>}
+            </ul>
           </div>
         </aside>
       </main>
