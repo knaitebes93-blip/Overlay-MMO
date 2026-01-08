@@ -1,19 +1,26 @@
 import { app } from "electron";
 import { promises as fs } from "fs";
 import { join } from "path";
-import { OverlayPlan, OverlaySettings, PlanLoadResult } from "../shared/ipc";
+import { EventLog, OverlayPlan, OverlaySettings, PlanLoadResult } from "../shared/ipc";
+import { eventLogSchema } from "../shared/eventLogSchema";
 import { overlayPlanSchema } from "../shared/planSchema";
 
 const PROFILE_NAME = "default";
 const SETTINGS_FILE = "settings.json";
 const PLAN_FILE = "plan.json";
 const PLAN_LAST_GOOD_FILE = "plan.last-good.json";
+const EVENT_LOG_FILE = "event-log.json";
 
 const defaultSettings: OverlaySettings = {
   bounds: null,
   displayId: null,
   opacity: 0.92,
   clickThrough: false
+};
+
+const defaultEventLog: EventLog = {
+  version: "1.0",
+  entries: []
 };
 
 const ensureProfileDir = async (): Promise<string> => {
@@ -134,4 +141,30 @@ export const savePlan = async (plan: OverlayPlan): Promise<void> => {
   const payload = validation.data as OverlayPlan;
   await writeJson(join(dir, PLAN_LAST_GOOD_FILE), payload);
   await writeJson(join(dir, PLAN_FILE), payload);
+};
+
+export const loadEventLog = async (): Promise<EventLog> => {
+  const dir = await ensureProfileDir();
+  const logPath = join(dir, EVENT_LOG_FILE);
+  const candidate = await readJsonUnknown(logPath);
+  if (candidate.data !== null) {
+    const validation = eventLogSchema.safeParse(candidate.data);
+    if (validation.success) {
+      return validation.data as EventLog;
+    }
+  }
+  return defaultEventLog;
+};
+
+export const saveEventLog = async (log: EventLog): Promise<void> => {
+  const validation = eventLogSchema.safeParse(log);
+  if (!validation.success) {
+    throw new Error(
+      `Refusing to save invalid event log: ${validation.error.errors
+        .map((err) => err.message)
+        .join("; ")}`
+    );
+  }
+  const dir = await ensureProfileDir();
+  await writeJson(join(dir, EVENT_LOG_FILE), validation.data as EventLog);
 };

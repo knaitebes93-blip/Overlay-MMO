@@ -1,16 +1,21 @@
 import React from "react";
-import { PanelWidget as PanelWidgetType, OverlayWidget } from "../../shared/ipc";
+import { EventLog, EventLogEntry, PanelWidget as PanelWidgetType, OverlayWidget } from "../../shared/ipc";
 import TextWidget from "./TextWidget";
 import CounterWidget from "./CounterWidget";
 import TimerWidget from "./TimerWidget";
 import ChecklistWidget from "./ChecklistWidget";
+import EventLogWidget from "./EventLogWidget";
+import RateWidget from "./RateWidget";
+import ProjectionWidget from "./ProjectionWidget";
 
 type Props = {
   widget: PanelWidgetType;
+  eventLog: EventLog;
+  onAddEventEntry: (entry: EventLogEntry) => void;
   onUpdate: (widget: OverlayWidget) => void;
 };
 
-const PanelWidget = ({ widget, onUpdate }: Props) => {
+const PanelWidget = ({ widget, eventLog, onAddEventEntry, onUpdate }: Props) => {
   const updateChild = (child: OverlayWidget) => {
     onUpdate({
       ...widget,
@@ -48,7 +53,29 @@ const PanelWidget = ({ widget, onUpdate }: Props) => {
               );
             case "panel":
               return (
-                <PanelWidget key={child.id} widget={child} onUpdate={updateChild} />
+                <PanelWidget
+                  key={child.id}
+                  widget={child}
+                  eventLog={eventLog}
+                  onAddEventEntry={onAddEventEntry}
+                  onUpdate={updateChild}
+                />
+              );
+            case "eventLog":
+              return (
+                <EventLogWidget
+                  key={child.id}
+                  widget={child}
+                  eventLog={eventLog}
+                  onAddEntry={onAddEventEntry}
+                  onUpdate={updateChild}
+                />
+              );
+            case "rate":
+              return <RateWidget key={child.id} widget={child} eventLog={eventLog} />;
+            case "projection":
+              return (
+                <ProjectionWidget key={child.id} widget={child} eventLog={eventLog} />
               );
             default:
               return null;

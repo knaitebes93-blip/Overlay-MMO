@@ -26,6 +26,28 @@ export const defaultPlan = (): OverlayPlan =>
           step: 1
         },
         {
+          id: "event-log-runs",
+          type: "eventLog",
+          title: "Dungeon Run Log",
+          eventType: "dungeon-run",
+          showLast: 5
+        },
+        {
+          id: "rate-runs",
+          type: "rate",
+          title: "Runs per Hour",
+          eventType: "dungeon-run",
+          lookbackMinutes: 60
+        },
+        {
+          id: "projection-runs",
+          type: "projection",
+          title: "Projected Runs",
+          eventType: "dungeon-run",
+          lookbackMinutes: 60,
+          horizonMinutes: 120
+        },
+        {
           id: "timer-session",
           type: "timer",
           title: "Session Timer",

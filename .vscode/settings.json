@@ -1,0 +1,7 @@
+{
+  "security.workspace.trust.enabled": true,
+  "task.allowAutomaticTasks": "on",
+  "task.confirmBeforeRun": false,
+  "git.confirmSync": false,
+  "git.confirmForcePush": false
+}

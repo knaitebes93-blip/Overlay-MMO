@@ -40,12 +40,34 @@ export const panelWidgetSchema = baseWidget.extend({
   children: z.array(z.lazy(() => widgetSchema))
 });
 
+export const eventLogWidgetSchema = baseWidget.extend({
+  type: z.literal("eventLog"),
+  eventType: z.string(),
+  showLast: z.number().int().min(1)
+});
+
+export const rateWidgetSchema = baseWidget.extend({
+  type: z.literal("rate"),
+  eventType: z.string(),
+  lookbackMinutes: z.number().int().min(1)
+});
+
+export const projectionWidgetSchema = baseWidget.extend({
+  type: z.literal("projection"),
+  eventType: z.string(),
+  lookbackMinutes: z.number().int().min(1),
+  horizonMinutes: z.number().int().min(1)
+});
+
 widgetSchema = z.discriminatedUnion("type", [
   textWidgetSchema,
   counterWidgetSchema,
   timerWidgetSchema,
   checklistWidgetSchema,
-  panelWidgetSchema
+  panelWidgetSchema,
+  eventLogWidgetSchema,
+  rateWidgetSchema,
+  projectionWidgetSchema
 ]);
 
 export { widgetSchema };

@@ -46,9 +46,9 @@
 - Adds widgets that compute rates and projections from the log.
 
 **Definition of Done**
-- [ ] Event log stores entries and reloads on restart.
-- [ ] Rate/projection widgets update when log entries are added.
-- [ ] All plan validations pass with new widget types.
+- [x] Event log stores entries and reloads on restart.
+- [x] Rate/projection widgets update when log entries are added.
+- [x] All plan validations pass with new widget types.
 
 **Manual test steps (Windows)**
 1. Add sample event entries from the overlay UI.

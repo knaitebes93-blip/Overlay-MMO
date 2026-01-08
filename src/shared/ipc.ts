@@ -16,6 +16,18 @@ export type OverlayPlan = {
   widgets: OverlayWidget[];
 };
 
+export type EventLogEntry = {
+  id: string;
+  eventType: string;
+  timestamp: number;
+  note?: string;
+};
+
+export type EventLog = {
+  version: "1.0";
+  entries: EventLogEntry[];
+};
+
 export type PlanLoadResult = {
   plan: OverlayPlan | null;
   warning?: string;
@@ -26,7 +38,10 @@ export type OverlayWidget =
   | CounterWidget
   | TimerWidget
   | ChecklistWidget
-  | PanelWidget;
+  | PanelWidget
+  | EventLogWidget
+  | RateWidget
+  | ProjectionWidget;
 
 export type BaseWidget = {
   id: string;
@@ -66,6 +81,25 @@ export type PanelWidget = BaseWidget & {
   children: OverlayWidget[];
 };
 
+export type EventLogWidget = BaseWidget & {
+  type: "eventLog";
+  eventType: string;
+  showLast: number;
+};
+
+export type RateWidget = BaseWidget & {
+  type: "rate";
+  eventType: string;
+  lookbackMinutes: number;
+};
+
+export type ProjectionWidget = BaseWidget & {
+  type: "projection";
+  eventType: string;
+  lookbackMinutes: number;
+  horizonMinutes: number;
+};
+
 export type PlannerResult = {
   plan: OverlayPlan;
   note: string;
@@ -78,6 +112,8 @@ export type OverlayAPI = {
   setDisplay: (displayId: number) => Promise<void>;
   loadPlan: () => Promise<PlanLoadResult>;
   savePlan: (plan: OverlayPlan) => Promise<void>;
+  loadEventLog: () => Promise<EventLog>;
+  saveEventLog: (log: EventLog) => Promise<void>;
   onEscapeHatch: (callback: () => void) => () => void;
 };
 

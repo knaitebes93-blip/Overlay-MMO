@@ -1,5 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { DisplayInfo, OverlayPlan, OverlaySettings, OverlayWidget } from "../shared/ipc";
+import {
+  DisplayInfo,
+  EventLog,
+  EventLogEntry,
+  OverlayPlan,
+  OverlaySettings,
+  OverlayWidget
+} from "../shared/ipc";
 import { overlayPlanSchema } from "../shared/planSchema";
 import { defaultPlan, plannerStub } from "./planner";
 import PlanRenderer from "./PlanRenderer";
@@ -10,6 +17,8 @@ const fallbackSettings: OverlaySettings = {
   opacity: 0.92,
   clickThrough: false
 };
+
+const emptyEventLog: EventLog = { version: "1.0", entries: [] };
 
 const updateWidgetById = (
   widgets: OverlayWidget[],
@@ -36,6 +45,8 @@ const App = () => {
   const [lastValidPlan, setLastValidPlan] = useState<OverlayPlan | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planWarning, setPlanWarning] = useState<string | null>(null);
+  const [eventLog, setEventLog] = useState<EventLog>(emptyEventLog);
+  const [eventLogError, setEventLogError] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [plannerNote, setPlannerNote] = useState("Ready.");
   const overlayAPI = window.overlayAPI;
@@ -47,27 +58,88 @@ const App = () => {
         setPlannerNote("Preload bridge not loaded. Restart dev server after rebuilding Electron.");
         setSettings(fallbackSettings);
         setPlan(defaultPlanMemo);
+        setEventLog(emptyEventLog);
         return;
       }
-      const [loadedSettings, displayList, stored] = await Promise.all([
+
+      const [settingsResult, displaysResult, planResult] = await Promise.allSettled([
         overlayAPI.getSettings(),
         overlayAPI.getDisplays(),
         overlayAPI.loadPlan()
       ]);
-      setSettings(loadedSettings);
-      setDisplays(displayList);
-      if (stored.warning) {
-        setPlanWarning(stored.warning);
+
+      if (settingsResult.status === "fulfilled") {
+        setSettings(settingsResult.value);
+      } else {
+        setSettings(fallbackSettings);
+        setPlannerNote(
+          `Failed to load settings. ${settingsResult.reason instanceof Error ? settingsResult.reason.message : ""}`.trim()
+        );
       }
-      if (stored.plan) {
-        setPlan(stored.plan);
+
+      if (displaysResult.status === "fulfilled") {
+        setDisplays(displaysResult.value);
+      } else {
+        setDisplays([]);
+      }
+
+      if (planResult.status === "fulfilled") {
+        const stored = planResult.value;
+        if (stored.warning) {
+          setPlanWarning(stored.warning);
+        }
+        if (stored.plan) {
+          const hasPhase2Widgets = stored.plan.widgets.some((widget) => {
+            if (widget.type === "eventLog" || widget.type === "rate" || widget.type === "projection") {
+              return true;
+            }
+            if (widget.type === "panel") {
+              return widget.children.some(
+                (child) =>
+                  child.type === "eventLog" || child.type === "rate" || child.type === "projection"
+              );
+            }
+            return false;
+          });
+          if (!hasPhase2Widgets) {
+            setPlannerNote("Loaded saved plan. Tip: type 'reset' to load Phase 2 widgets.");
+          }
+          setPlan(stored.plan);
+        } else {
+          const initialPlan = defaultPlanMemo;
+          setPlan(initialPlan);
+          await overlayAPI.savePlan(initialPlan);
+        }
       } else {
         const initialPlan = defaultPlanMemo;
         setPlan(initialPlan);
-        await overlayAPI.savePlan(initialPlan);
+        overlayAPI.savePlan(initialPlan).catch(() => undefined);
+      }
+
+      if (typeof overlayAPI.loadEventLog === "function") {
+        try {
+          const loadedEventLog = await overlayAPI.loadEventLog();
+          setEventLog(loadedEventLog);
+          setEventLogError(null);
+        } catch (error: unknown) {
+          setEventLog(emptyEventLog);
+          setEventLogError(
+            error instanceof Error
+              ? error.message
+              : "Failed to load event log. Restart Electron to load updated IPC handlers."
+          );
+        }
+      } else {
+        setEventLog(emptyEventLog);
+        setEventLogError("Event log API not available. Restart Electron to load updated IPC handlers.");
       }
     };
-    bootstrap().catch(() => undefined);
+    bootstrap().catch((error: unknown) => {
+      setSettings(fallbackSettings);
+      setPlan(defaultPlanMemo);
+      setEventLog(emptyEventLog);
+      setPlannerNote(error instanceof Error ? error.message : "Bootstrap failed.");
+    });
   }, [overlayAPI, defaultPlanMemo]);
 
   useEffect(() => {
@@ -141,6 +213,29 @@ const App = () => {
     });
   };
 
+  const persistEventLog = async (next: EventLog) => {
+    if (!overlayAPI || typeof overlayAPI.saveEventLog !== "function") {
+      setEventLogError("Event log API not available. Restart Electron to load updated IPC handlers.");
+      return;
+    }
+    try {
+      await overlayAPI.saveEventLog(next);
+      setEventLogError(null);
+    } catch (error: unknown) {
+      setEventLogError(
+        error instanceof Error ? error.message : "Failed to save event log."
+      );
+    }
+  };
+
+  const handleAddEventEntry = (entry: EventLogEntry) => {
+    setEventLog((prev) => {
+      const next = { ...prev, entries: [...prev.entries, entry] };
+      persistEventLog(next).catch(() => undefined);
+      return next;
+    });
+  };
+
   const handleChatSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!plan) {
@@ -202,19 +297,24 @@ const App = () => {
 
       <main className="content">
         <section className="overlay-panel">
-          {(planWarning || planError) && (
+          {(planWarning || planError || eventLogError) && (
             <div className="error-banner">
-              {planWarning && (
-                <>
-                  {planWarning}
-                  {planError ? " " : ""}
-                </>
+              {planWarning && <div>{planWarning}</div>}
+              {planError && (
+                <div>
+                  Plan validation failed. Keeping last valid plan. {planError}
+                </div>
               )}
-              {planError && <>Plan validation failed. Keeping last valid plan. {planError}</>}
+              {eventLogError && <div>Event log error. {eventLogError}</div>}
             </div>
           )}
           {activePlan && (
-            <PlanRenderer plan={activePlan} onUpdate={handleWidgetUpdate} />
+            <PlanRenderer
+              plan={activePlan}
+              eventLog={eventLog}
+              onAddEventEntry={handleAddEventEntry}
+              onUpdate={handleWidgetUpdate}
+            />
           )}
         </section>
 

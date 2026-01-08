@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain, screen, globalShortcut } from "electron";
 import { join } from "path";
-import { loadPlan, loadSettings, savePlan, saveSettings } from "./storage";
-import { DisplayInfo, OverlayPlan, OverlaySettings } from "../shared/ipc";
+import { loadEventLog, loadPlan, loadSettings, saveEventLog, savePlan, saveSettings } from "./storage";
+import { DisplayInfo, EventLog, OverlayPlan, OverlaySettings } from "../shared/ipc";
 
 let overlayWindow: BrowserWindow | null = null;
 let cachedSettings: OverlaySettings | null = null;
@@ -174,6 +174,12 @@ const registerIpc = () => {
 
   ipcMain.handle("plan:save", async (_event, plan: OverlayPlan) => {
     await savePlan(plan);
+  });
+
+  ipcMain.handle("event-log:load", async () => loadEventLog());
+
+  ipcMain.handle("event-log:save", async (_event, log: EventLog) => {
+    await saveEventLog(log);
   });
 };
 
