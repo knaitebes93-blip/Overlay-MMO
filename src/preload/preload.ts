@@ -13,6 +13,7 @@ import {
   PlanSaveMeta,
   RulesStore
 } from "../shared/ipc";
+import type { WidgetSpec } from "../widgetSpec";
 
 const formatError = (error: unknown) => {
   if (error instanceof Error) {
@@ -34,7 +35,8 @@ const api: OverlayAPI = {
   getDisplays: () => ipcRenderer.invoke("app:get-displays"),
   setDisplay: (displayId: number) => ipcRenderer.invoke("app:set-display", displayId),
   loadPlan: () => ipcRenderer.invoke("plan:load"),
-  savePlan: (plan: OverlayPlan, meta?: PlanSaveMeta) => ipcRenderer.invoke("plan:save", plan, meta),
+  savePlan: (plan: OverlayPlan | WidgetSpec, meta?: PlanSaveMeta) =>
+    ipcRenderer.invoke("plan:save", plan, meta),
   undoPlan: () => ipcRenderer.invoke("plan:undo"),
   redoPlan: () => ipcRenderer.invoke("plan:redo"),
   rollbackPlan: (snapshotId: string) => ipcRenderer.invoke("plan:rollback", snapshotId),

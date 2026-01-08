@@ -19,9 +19,19 @@ import {
   TextWidget,
   OverlayWidget
 } from "../shared/ipc";
-import { overlayPlanSchema } from "../shared/planSchema";
+import { runPlanValidations } from "../shared/planValidation";
+import { buildPlanFromChat } from "../builder/widgetBuilderEngine";
+import { Question } from "../builder/questions";
+import { WidgetSpec } from "../widgetSpec";
 import { defaultPlan, plannerStub } from "./planner";
 import PlanRenderer from "./PlanRenderer";
+import { ChatComposer } from "../components/Composer/ChatComposer";
+import {
+  applyPlan,
+  buildFallbackWidgetSpec,
+  overlayPlanToWidgetSpec,
+  widgetSpecToOverlayPlan
+} from "../state/planStore";
 
 const fallbackSettings: OverlaySettings = {
   bounds: null,
@@ -199,6 +209,10 @@ const App = () => {
   const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const [plan, setPlan] = useState<OverlayPlan | null>(null);
   const [lastValidPlan, setLastValidPlan] = useState<OverlayPlan | null>(null);
+  const [widgetSpecPlan, setWidgetSpecPlan] = useState<WidgetSpec | null>(null);
+  const [, setLastKnownGoodWidgetSpec] = useState<WidgetSpec | null>(null);
+  const [, setPlanLoadStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [, setPlanLoadError] = useState<string | null>(null);
   const [planError, setPlanError] = useState<string | null>(null);
   const [planWarning, setPlanWarning] = useState<string | null>(null);
   const [eventLog, setEventLog] = useState<EventLog>(emptyEventLog);
@@ -227,6 +241,12 @@ const App = () => {
   const [roiError, setRoiError] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState("");
   const [plannerNote, setPlannerNote] = useState("Ready.");
+  const [draftWidgetSpec, setDraftWidgetSpec] = useState<WidgetSpec | null>(null);
+  const [builderQuestions, setBuilderQuestions] = useState<Question[]>([]);
+  const [builderAnswers, setBuilderAnswers] = useState<Record<string, string>>({});
+  const [builderMessage, setBuilderMessage] = useState<string | null>(null);
+  const [builderError, setBuilderError] = useState<string | null>(null);
+  const [builderDebug, setBuilderDebug] = useState<string[]>([]);
   const [inspectorCollapsed, setInspectorCollapsed] = useState(false);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>("widget");
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
@@ -269,6 +289,7 @@ const App = () => {
         return;
       }
 
+      setPlanLoadStatus("loading");
       const [settingsResult, displaysResult, planResult] = await Promise.allSettled([
         overlayAPI.getSettings(),
         overlayAPI.getDisplays(),
@@ -296,7 +317,12 @@ const App = () => {
           setPlanWarning(stored.warning);
         }
         if (stored.plan) {
-          const hasPhase2Widgets = stored.plan.widgets.some((widget) => {
+          const overlayPlan = widgetSpecToOverlayPlan(stored.plan);
+          setWidgetSpecPlan(stored.plan);
+          setLastKnownGoodWidgetSpec(stored.plan);
+          setPlanLoadStatus("ready");
+          setPlanLoadError(null);
+          const hasPhase2Widgets = overlayPlan.widgets.some((widget) => {
             if (widget.type === "eventLog" || widget.type === "rate" || widget.type === "projection") {
               return true;
             }
@@ -311,16 +337,37 @@ const App = () => {
           if (!hasPhase2Widgets) {
             setPlannerNote("Loaded saved plan. Tip: type 'reset' to load Phase 2 widgets.");
           }
-          setPlan(stored.plan);
+          setPlan(overlayPlan);
+          setLastValidPlan(overlayPlan);
         } else {
-          const initialPlan = defaultPlanMemo;
-          setPlan(initialPlan);
-          await overlayAPI.savePlan(initialPlan, { reason: "bootstrap", actor: "user" });
+          const fallbackSpec = buildFallbackWidgetSpec(
+            PROFILE_ID,
+            "No plan loaded. Created a minimal WidgetSpec plan."
+          );
+          const overlayPlan = widgetSpecToOverlayPlan(fallbackSpec);
+          setWidgetSpecPlan(fallbackSpec);
+          setLastKnownGoodWidgetSpec(fallbackSpec);
+          setPlanLoadStatus("error");
+          setPlanLoadError("No plan loaded.");
+          setPlan(overlayPlan);
+          setLastValidPlan(overlayPlan);
+          await overlayAPI.savePlan(fallbackSpec, { reason: "bootstrap", actor: "system" });
         }
       } else {
-        const initialPlan = defaultPlanMemo;
-        setPlan(initialPlan);
-        overlayAPI.savePlan(initialPlan, { reason: "bootstrap", actor: "user" }).catch(() => undefined);
+        const fallbackSpec = buildFallbackWidgetSpec(
+          PROFILE_ID,
+          "Failed to load plan. Created a minimal WidgetSpec plan."
+        );
+        const overlayPlan = widgetSpecToOverlayPlan(fallbackSpec);
+        setWidgetSpecPlan(fallbackSpec);
+        setLastKnownGoodWidgetSpec(fallbackSpec);
+        setPlanLoadStatus("error");
+        setPlanLoadError("Failed to load plan.");
+        setPlan(overlayPlan);
+        setLastValidPlan(overlayPlan);
+        overlayAPI
+          .savePlan(fallbackSpec, { reason: "bootstrap", actor: "system" })
+          .catch(() => undefined);
       }
 
       if (typeof overlayAPI.loadEventLog === "function") {
@@ -371,7 +418,15 @@ const App = () => {
     };
     bootstrap().catch((error: unknown) => {
       setSettings(fallbackSettings);
-      setPlan(defaultPlanMemo);
+      const fallbackSpec = buildFallbackWidgetSpec(
+        PROFILE_ID,
+        "Bootstrap failed. Created a minimal WidgetSpec plan."
+      );
+      setWidgetSpecPlan(fallbackSpec);
+      setLastKnownGoodWidgetSpec(fallbackSpec);
+      setPlan(widgetSpecToOverlayPlan(fallbackSpec));
+      setPlanLoadStatus("error");
+      setPlanLoadError("Bootstrap failed.");
       setEventLog(emptyEventLog);
       setPlannerNote(error instanceof Error ? error.message : "Bootstrap failed.");
     });
@@ -381,12 +436,12 @@ const App = () => {
     if (!plan) {
       return;
     }
-    const result = overlayPlanSchema.safeParse(plan);
-    if (result.success) {
+    const result = runPlanValidations(plan);
+    if (result.overlay.success) {
       setLastValidPlan(plan);
       setPlanError(null);
     } else {
-      setPlanError(result.error.errors.map((err) => err.message).join("; "));
+      setPlanError(result.overlay.error.errors.map((err) => err.message).join("; "));
     }
   }, [plan]);
 
@@ -461,8 +516,11 @@ const App = () => {
     }
     try {
       const next = await overlayAPI.undoPlan();
-      setPlan(next);
-      setLastValidPlan(next);
+      const overlayPlan = widgetSpecToOverlayPlan(next);
+      setWidgetSpecPlan(next);
+      setLastKnownGoodWidgetSpec(next);
+      setPlan(overlayPlan);
+      setLastValidPlan(overlayPlan);
       setPlanError(null);
     } catch (error: unknown) {
       setPlanError(error instanceof Error ? error.message : "Undo failed.");
@@ -476,8 +534,11 @@ const App = () => {
     }
     try {
       const next = await overlayAPI.redoPlan();
-      setPlan(next);
-      setLastValidPlan(next);
+      const overlayPlan = widgetSpecToOverlayPlan(next);
+      setWidgetSpecPlan(next);
+      setLastKnownGoodWidgetSpec(next);
+      setPlan(overlayPlan);
+      setLastValidPlan(overlayPlan);
       setPlanError(null);
     } catch (error: unknown) {
       setPlanError(error instanceof Error ? error.message : "Redo failed.");
@@ -491,8 +552,11 @@ const App = () => {
     }
     try {
       const next = await overlayAPI.rollbackPlan(snapshotId);
-      setPlan(next);
-      setLastValidPlan(next);
+      const overlayPlan = widgetSpecToOverlayPlan(next);
+      setWidgetSpecPlan(next);
+      setLastKnownGoodWidgetSpec(next);
+      setPlan(overlayPlan);
+      setLastValidPlan(overlayPlan);
       setPlanError(null);
     } catch (error: unknown) {
       setPlanError(error instanceof Error ? error.message : "Rollback failed.");
@@ -707,10 +771,20 @@ const App = () => {
     if (!plan) {
       return;
     }
-    const next = { ...plan, widgets: updateWidgetById(plan.widgets, updated) };
-    setPlan(next);
-    overlayAPI?.savePlan(next, { reason: "widget:update", actor: "user" }).catch((error: unknown) => {
-      setPlanError(error instanceof Error ? error.message : "Failed to save plan.");
+    const nextOverlay = { ...plan, widgets: updateWidgetById(plan.widgets, updated) };
+    const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
+    const widgetSpec = overlayPlanToWidgetSpec(nextOverlay, profileId);
+    applyPlan(overlayAPI, widgetSpec, { reason: "widget:update", actor: "user" }).then((result) => {
+      if (result.ok) {
+        const overlayPlan = widgetSpecToOverlayPlan(result.plan);
+        setWidgetSpecPlan(result.plan);
+        setLastKnownGoodWidgetSpec(result.plan);
+        setPlan(overlayPlan);
+        setLastValidPlan(overlayPlan);
+        setPlanError(null);
+      } else {
+        setPlanError(result.error);
+      }
     });
   };
 
@@ -905,7 +979,7 @@ const App = () => {
 
   const applyRulesFromPassiveInput = useCallback(
     async (input: PassiveInput) => {
-      if (!plan || !overlayAPI || typeof overlayAPI.savePlan !== "function") {
+      if (!plan || !overlayAPI) {
         return;
       }
       const passiveText = normalizePassiveText(input.text);
@@ -1058,9 +1132,20 @@ const App = () => {
       }
 
       try {
-        await overlayAPI.savePlan(nextPlan, { reason: "rules:apply", actor: "rules" });
-        setPlan(nextPlan);
-        setLastValidPlan(nextPlan);
+        const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
+        const widgetSpec = overlayPlanToWidgetSpec(nextPlan, profileId);
+        const result = await applyPlan(overlayAPI, widgetSpec, {
+          reason: "rules:apply",
+          actor: "rules"
+        });
+        if (!result.ok) {
+          return;
+        }
+        const savedOverlay = widgetSpecToOverlayPlan(result.plan);
+        setWidgetSpecPlan(result.plan);
+        setLastKnownGoodWidgetSpec(result.plan);
+        setPlan(savedOverlay);
+        setLastValidPlan(savedOverlay);
 
         const entry: EventLogEntry = {
           id: buildEntryId(),
@@ -1074,7 +1159,7 @@ const App = () => {
         // If save fails, don't surface it as OCR error.
       }
     },
-    [handleAddEventEntry, overlayAPI, persistRules, plan, rulesStore]
+    [handleAddEventEntry, overlayAPI, persistRules, plan, rulesStore, widgetSpecPlan]
   );
 
   const handleAddManualEventEntry = useCallback(
@@ -1321,23 +1406,64 @@ const App = () => {
   const handleChatSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
     const trimmed = chatInput.trim();
-    if (!plan || !trimmed) {
+    if (!trimmed) {
       return;
     }
     setChatInput("");
+    setBuilderMessage(trimmed);
+    setBuilderAnswers({});
+    setBuilderQuestions([]);
+    setBuilderError(null);
+    setBuilderDebug([]);
+
+    const builderResult = buildPlanFromChat({
+      message: trimmed,
+      profileId: PROFILE_ID,
+      currentPlan: draftWidgetSpec ?? undefined
+    });
+    setBuilderDebug(builderResult.debug ?? []);
+    setBuilderQuestions(builderResult.nextQuestions);
+    if (builderResult.draftPlan) {
+      setDraftWidgetSpec(builderResult.draftPlan);
+      setBuilderError(null);
+      setPlannerNote("WidgetSpec draft ready.");
+    } else if (builderResult.nextQuestions.length > 0) {
+      setPlannerNote("Builder needs more details.");
+    } else if (builderResult.debug?.length) {
+      setBuilderError(builderResult.debug.join(" | "));
+    }
 
     if (trimmed.toLowerCase() === "reset") {
       const resetPlan = defaultPlanMemo;
-      setPlan(resetPlan);
-      setLastValidPlan(resetPlan);
-      setPlanError(null);
-      setPlanWarning(null);
       setRulesStore(emptyRules);
       setLlmError(null);
-      setPlannerNote("Plan reset to defaults.");
-      if (overlayAPI) {
-        await overlayAPI.savePlan(resetPlan, { reason: "reset", actor: "user" });
+      setPlannerNote("Resetting plan...");
+      setDraftWidgetSpec({
+        version: "1.0",
+        profileId: PROFILE_ID,
+        widgets: []
+      });
+      if (overlayAPI && typeof overlayAPI.saveRules === "function") {
         await overlayAPI.saveRules(emptyRules);
+      }
+      const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
+      const resetSpec = overlayPlanToWidgetSpec(resetPlan, profileId);
+      const result = await applyPlan(overlayAPI, resetSpec, {
+        reason: "reset",
+        actor: "user"
+      });
+      if (result.ok) {
+        const overlayPlan = widgetSpecToOverlayPlan(result.plan);
+        setWidgetSpecPlan(result.plan);
+        setLastKnownGoodWidgetSpec(result.plan);
+        setPlan(overlayPlan);
+        setLastValidPlan(overlayPlan);
+        setPlanError(null);
+        setPlanWarning(null);
+        setPlannerNote("Plan reset to defaults.");
+      } else {
+        setPlanError(result.error);
+        setPlannerNote("Plan reset failed.");
       }
       return;
     }
@@ -1350,12 +1476,34 @@ const App = () => {
           rules: rulesStore
         });
         setPlannerNote(result.note || "Planner updated the plan.");
-        setPlan(result.plan);
-        setLastValidPlan(result.plan);
         setRulesStore(result.rules);
         setPlanError(null);
-        setPlanWarning(null);
         setLlmError(null);
+        setPlanWarning(null);
+        try {
+          const loaded = await overlayAPI.loadPlan();
+          if (loaded.warning) {
+            setPlanWarning(loaded.warning);
+          } else {
+            setPlanWarning(null);
+          }
+          if (loaded.plan) {
+            const overlayPlan = widgetSpecToOverlayPlan(loaded.plan);
+            setWidgetSpecPlan(loaded.plan);
+            setLastKnownGoodWidgetSpec(loaded.plan);
+            setPlan(overlayPlan);
+            setLastValidPlan(overlayPlan);
+            return;
+          }
+        } catch {
+          // Fall back to composing with the returned overlay plan.
+        }
+        const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
+        const widgetSpec = overlayPlanToWidgetSpec(result.plan, profileId);
+        setWidgetSpecPlan(widgetSpec);
+        setLastKnownGoodWidgetSpec(widgetSpec);
+        setPlan(result.plan);
+        setLastValidPlan(result.plan);
         return;
       } catch (error: unknown) {
         const message =
@@ -1366,20 +1514,84 @@ const App = () => {
       }
     }
 
-    const result = plannerStub(trimmed, plan);
+    const basePlan = plan ?? defaultPlanMemo;
+    const result = plannerStub(trimmed, basePlan);
     setPlannerNote(result.note);
     setLlmError(null);
-    const validation = overlayPlanSchema.safeParse(result.plan);
-    if (validation.success) {
-      setPlan(result.plan);
-      setLastValidPlan(result.plan);
-      setPlanError(null);
-      setPlanWarning(null);
-      if (overlayAPI) {
-        await overlayAPI.savePlan(result.plan, { reason: "compose", actor: "user" });
+    const validation = runPlanValidations(result.plan);
+    if (validation.overlay.success) {
+      const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
+      const widgetSpec = overlayPlanToWidgetSpec(result.plan, profileId);
+      const applied = await applyPlan(overlayAPI, widgetSpec, {
+        reason: "compose",
+        actor: "user"
+      });
+      if (applied.ok) {
+        const overlayPlan = widgetSpecToOverlayPlan(applied.plan);
+        setWidgetSpecPlan(applied.plan);
+        setLastKnownGoodWidgetSpec(applied.plan);
+        setPlan(overlayPlan);
+        setLastValidPlan(overlayPlan);
+        setPlanError(null);
+        setPlanWarning(null);
+      } else {
+        setPlanError(applied.error);
       }
     } else {
-      setPlanError(validation.error.errors.map((err) => err.message).join("; "));
+      setPlanError(validation.overlay.error.errors.map((err) => err.message).join("; "));
+    }
+  };
+
+  const handleBuilderAnswerChange = (id: string, value: string) => {
+    setBuilderAnswers((prev) => ({ ...prev, [id]: value }));
+  };
+
+  const handleBuilderContinue = () => {
+    if (!builderMessage) {
+      return;
+    }
+    setBuilderError(null);
+    const builderResult = buildPlanFromChat({
+      message: builderMessage,
+      profileId: PROFILE_ID,
+      currentPlan: draftWidgetSpec ?? undefined,
+      answers: builderAnswers
+    });
+    setBuilderDebug(builderResult.debug ?? []);
+    setBuilderQuestions(builderResult.nextQuestions);
+    if (builderResult.draftPlan) {
+      setDraftWidgetSpec(builderResult.draftPlan);
+      setBuilderError(null);
+      setBuilderMessage(null);
+      setPlannerNote("WidgetSpec draft ready.");
+    } else if (builderResult.nextQuestions.length > 0) {
+      setPlannerNote("Builder needs more details.");
+    } else if (builderResult.debug?.length) {
+      setBuilderError(builderResult.debug.join(" | "));
+    }
+  };
+
+  const handleApplyDraftPlan = async () => {
+    if (!draftWidgetSpec) {
+      return;
+    }
+    setBuilderError(null);
+    const result = await applyPlan(overlayAPI, draftWidgetSpec, {
+      reason: "compose",
+      actor: "user"
+    });
+    if (result.ok) {
+      const overlayPlan = widgetSpecToOverlayPlan(result.plan);
+      setWidgetSpecPlan(result.plan);
+      setLastKnownGoodWidgetSpec(result.plan);
+      setPlan(overlayPlan);
+      setLastValidPlan(overlayPlan);
+      setDraftWidgetSpec(null);
+      setBuilderQuestions([]);
+      setBuilderAnswers({});
+      setPlannerNote("Draft plan applied.");
+    } else {
+      setBuilderError(result.error);
     }
   };
 
@@ -1610,22 +1822,24 @@ const App = () => {
               </div>
               <div className="panel-section">
                 <h3>Compose</h3>
-                <form onSubmit={handleChatSubmit}>
-                  <textarea
-                    value={chatInput}
-                    onChange={(event) => setChatInput(event.target.value)}
-                    placeholder="Try: text: Welcome to the raid"
-                    rows={6}
-                  />
-                  <button type="submit">Compose Plan</button>
-                </form>
-                <div className="chat-hints">
-                  <p>Planner commands:</p>
-                  <ul>
-                    <li><strong>reset</strong> - restore default overlay plan</li>
-                    <li><strong>text: ...</strong> - create a text-only plan</li>
-                  </ul>
-                </div>
+                <ChatComposer
+                  chatInput={chatInput}
+                  onChatInputChange={setChatInput}
+                  onSubmit={handleChatSubmit}
+                  nextQuestions={builderQuestions}
+                  answers={builderAnswers}
+                  onAnswerChange={handleBuilderAnswerChange}
+                  onContinue={handleBuilderContinue}
+                  builderError={builderError}
+                  builderDebug={builderDebug}
+                  draftSummary={
+                    draftWidgetSpec
+                      ? `Draft WidgetSpec ready with ${draftWidgetSpec.widgets.length} widget(s).`
+                      : null
+                  }
+                  canApplyDraft={!!draftWidgetSpec && builderQuestions.length === 0}
+                  onApplyDraft={handleApplyDraftPlan}
+                />
               </div>
               <div className="llm-panel">
                 <h3>AI Provider</h3>

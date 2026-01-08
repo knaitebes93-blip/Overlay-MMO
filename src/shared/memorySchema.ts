@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { overlayPlanSchema } from "./planSchema";
+import { widgetSpecSchema } from "../widgetSpec/widgetSpec";
 
 const memoryEntryBaseSchema = z.object({
   id: z.string(),
@@ -11,9 +12,9 @@ const memoryEntryBaseSchema = z.object({
 
 const planSnapshotPayloadSchema = z.object({
   snapshotId: z.string().min(1),
-  planJson: overlayPlanSchema,
+  planJson: z.union([widgetSpecSchema, overlayPlanSchema]),
   reason: z.string().min(1),
-  actor: z.enum(["user", "rules"]),
+  actor: z.enum(["user", "rules", "system"]),
   baseSnapshotId: z.string().optional()
 });
 

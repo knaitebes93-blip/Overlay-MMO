@@ -6,7 +6,6 @@ import {
   EventLog,
   MemoryEntry,
   MemoryStore,
-  OverlayPlan,
   OverlaySettings,
   PlanSaveMeta,
   PlanLoadResult,
@@ -14,8 +13,8 @@ import {
 } from "../shared/ipc";
 import { eventLogSchema } from "../shared/eventLogSchema";
 import { memoryEntrySchema, memoryStoreSchema } from "../shared/memorySchema";
-import { overlayPlanSchema } from "../shared/planSchema";
 import { rulesStoreSchema } from "../shared/rulesSchema";
+import { migrateLegacyPlan, validateWidgetSpec, WidgetSpec } from "../widgetSpec";
 
 const PROFILE_NAME = "default";
 const SETTINGS_FILE = "settings.json";
@@ -235,6 +234,52 @@ export const saveSettings = async (settings: OverlaySettings): Promise<void> => 
   await writeJson(join(dir, SETTINGS_FILE), settings);
 };
 
+const buildFallbackWidgetSpec = (message: string): WidgetSpec => ({
+  version: "1.0",
+  profileId: PROFILE_NAME,
+  widgets: [
+    {
+      id: "notes_fallback",
+      type: "notes",
+      title: "Plan Reset",
+      data: {
+        requiredFields: [
+          {
+            key: "text",
+            label: "Text",
+            type: "string",
+            question: "Notes text?"
+          }
+        ],
+        values: { text: message },
+        outputs: [{ label: "Text", valueKey: "text" }],
+        layout: { w: 320, h: 160 }
+      }
+    }
+  ]
+});
+
+const resolveWidgetSpecPlan = (
+  payload: unknown
+): { ok: true; plan: WidgetSpec; warnings: string[] } | { ok: false; error: string } => {
+  const validated = validateWidgetSpec(payload);
+  if (validated.ok) {
+    return { ok: true, plan: validated.value, warnings: [] };
+  }
+  const migration = migrateLegacyPlan(payload, PROFILE_NAME);
+  if (migration.ok) {
+    const migratedValidation = validateWidgetSpec(migration.value);
+    if (migratedValidation.ok) {
+      return { ok: true, plan: migratedValidation.value, warnings: migration.warnings };
+    }
+    return { ok: false, error: migratedValidation.error };
+  }
+  return {
+    ok: false,
+    error: `${validated.error} | ${migration.error}`.trim()
+  };
+};
+
 export const loadPlan = async (): Promise<PlanLoadResult> => {
   const dir = await ensureProfileDir();
   const planPath = join(dir, PLAN_FILE);
@@ -242,75 +287,83 @@ export const loadPlan = async (): Promise<PlanLoadResult> => {
 
   const candidate = await readJsonUnknown(planPath);
   if (candidate.data !== null) {
-    const validation = overlayPlanSchema.safeParse(candidate.data);
-    if (validation.success) {
-      return { plan: validation.data as OverlayPlan };
+    const validation = resolveWidgetSpecPlan(candidate.data);
+    if (validation.ok) {
+      if (validation.warnings.length > 0) {
+        return {
+          plan: validation.plan,
+          warning: `Plan migrado desde formato legado. ${validation.warnings.join(" ")}`
+        };
+      }
+      return { plan: validation.plan };
     }
 
     const backup = await readJsonUnknown(backupPath);
     if (backup.data !== null) {
-      const backupValidation = overlayPlanSchema.safeParse(backup.data);
-      if (backupValidation.success) {
+      const backupValidation = resolveWidgetSpecPlan(backup.data);
+      if (backupValidation.ok) {
         return {
-          plan: backupValidation.data as OverlayPlan,
-          warning: `Plan inválido en disco; usando último plan válido. ${validation.error.errors
-            .map((err) => err.message)
-            .join("; ")}`
+          plan: backupValidation.plan,
+          warning: `Plan invalido en disco; usando ultimo plan valido. ${validation.error}`
         };
       }
     }
 
+    const fallback = buildFallbackWidgetSpec("Plan invalido. Se restauro un plan minimo.");
+    await writeJson(backupPath, fallback);
+    await writeJson(planPath, fallback);
     return {
-      plan: null,
-      warning: `Plan inválido en disco y no se encontró respaldo válido. ${validation.error.errors
-        .map((err) => err.message)
-        .join("; ")}`
+      plan: fallback,
+      warning: `Plan invalido en disco y no se encontro respaldo valido. ${validation.error}`
     };
   }
 
   const backup = await readJsonUnknown(backupPath);
   if (backup.data !== null) {
-    const backupValidation = overlayPlanSchema.safeParse(backup.data);
-    if (backupValidation.success) {
-      return { plan: backupValidation.data as OverlayPlan };
+    const backupValidation = resolveWidgetSpecPlan(backup.data);
+    if (backupValidation.ok) {
+      return { plan: backupValidation.plan };
     }
   }
 
+  const fallback = buildFallbackWidgetSpec("No se encontro plan. Se creo un plan minimo.");
+  await writeJson(backupPath, fallback);
+  await writeJson(planPath, fallback);
+
   if (candidate.missing) {
-    return { plan: null };
+    return { plan: fallback };
   }
 
   return {
-    plan: null,
+    plan: fallback,
     warning: candidate.error
       ? `No se pudo leer plan.json. ${candidate.error}`
       : "No se pudo leer plan.json."
   };
 };
 
-export const savePlan = async (plan: OverlayPlan, meta?: PlanSaveMeta): Promise<void> => {
-  const validation = overlayPlanSchema.safeParse(plan);
-  if (!validation.success) {
-    throw new Error(
-      `Refusing to save invalid plan: ${validation.error.errors
-        .map((err) => err.message)
-        .join("; ")}`
-    );
+export const savePlan = async (
+  plan: WidgetSpec | unknown,
+  meta?: PlanSaveMeta
+): Promise<WidgetSpec> => {
+  const validation = resolveWidgetSpecPlan(plan);
+  if (!validation.ok) {
+    throw new Error(`Refusing to save invalid plan: ${validation.error}`);
   }
   const dir = await ensureProfileDir();
-  const payload = validation.data as OverlayPlan;
+  const payload = validation.plan;
 
   const planPath = join(dir, PLAN_FILE);
   const backupPath = join(dir, PLAN_LAST_GOOD_FILE);
   const historyPath = join(dir, PLAN_HISTORY_FILE);
 
-  const readValidatedPlan = async (file: string): Promise<OverlayPlan | null> => {
+  const readValidatedPlan = async (file: string): Promise<WidgetSpec | null> => {
     const candidate = await readJsonUnknown(file);
     if (candidate.data === null) {
       return null;
     }
-    const parsed = overlayPlanSchema.safeParse(candidate.data);
-    return parsed.success ? (parsed.data as OverlayPlan) : null;
+    const parsed = resolveWidgetSpecPlan(candidate.data);
+    return parsed.ok ? parsed.plan : null;
   };
 
   const current = (await readValidatedPlan(planPath)) ?? (await readValidatedPlan(backupPath));
@@ -361,6 +414,7 @@ export const savePlan = async (plan: OverlayPlan, meta?: PlanSaveMeta): Promise<
 
   await writeJson(backupPath, payload);
   await writeJson(planPath, payload);
+  return payload;
 };
 
 const readPlanHistory = async (dir: string): Promise<PlanHistory> => {
@@ -381,7 +435,7 @@ const readPlanHistory = async (dir: string): Promise<PlanHistory> => {
   };
 };
 
-export const undoPlan = async (): Promise<OverlayPlan> => {
+export const undoPlan = async (): Promise<WidgetSpec> => {
   const dir = await ensureProfileDir();
   const planPath = join(dir, PLAN_FILE);
   const backupPath = join(dir, PLAN_LAST_GOOD_FILE);
@@ -399,8 +453,8 @@ export const undoPlan = async (): Promise<OverlayPlan> => {
   if (!nextEntry) {
     throw new Error("Undo snapshot not found.");
   }
-  const nextValidation = overlayPlanSchema.safeParse(nextEntry.payload.planJson);
-  if (!nextValidation.success) {
+  const nextValidation = resolveWidgetSpecPlan(nextEntry.payload.planJson);
+  if (!nextValidation.ok) {
     throw new Error("Undo snapshot contains an invalid plan.");
   }
 
@@ -416,12 +470,12 @@ export const undoPlan = async (): Promise<OverlayPlan> => {
   );
 
   await writeJson(join(dir, PLAN_HISTORY_FILE), nextHistory);
-  await writeJson(backupPath, nextValidation.data as OverlayPlan);
-  await writeJson(planPath, nextValidation.data as OverlayPlan);
-  return nextValidation.data as OverlayPlan;
+  await writeJson(backupPath, nextValidation.plan);
+  await writeJson(planPath, nextValidation.plan);
+  return nextValidation.plan;
 };
 
-export const redoPlan = async (): Promise<OverlayPlan> => {
+export const redoPlan = async (): Promise<WidgetSpec> => {
   const dir = await ensureProfileDir();
   const planPath = join(dir, PLAN_FILE);
   const backupPath = join(dir, PLAN_LAST_GOOD_FILE);
@@ -439,8 +493,8 @@ export const redoPlan = async (): Promise<OverlayPlan> => {
   if (!nextEntry) {
     throw new Error("Redo snapshot not found.");
   }
-  const nextValidation = overlayPlanSchema.safeParse(nextEntry.payload.planJson);
-  if (!nextValidation.success) {
+  const nextValidation = resolveWidgetSpecPlan(nextEntry.payload.planJson);
+  if (!nextValidation.ok) {
     throw new Error("Redo snapshot contains an invalid plan.");
   }
 
@@ -456,12 +510,12 @@ export const redoPlan = async (): Promise<OverlayPlan> => {
   );
 
   await writeJson(join(dir, PLAN_HISTORY_FILE), nextHistory);
-  await writeJson(backupPath, nextValidation.data as OverlayPlan);
-  await writeJson(planPath, nextValidation.data as OverlayPlan);
-  return nextValidation.data as OverlayPlan;
+  await writeJson(backupPath, nextValidation.plan);
+  await writeJson(planPath, nextValidation.plan);
+  return nextValidation.plan;
 };
 
-export const rollbackPlan = async (snapshotId: string): Promise<OverlayPlan> => {
+export const rollbackPlan = async (snapshotId: string): Promise<WidgetSpec> => {
   const dir = await ensureProfileDir();
   const planPath = join(dir, PLAN_FILE);
   const backupPath = join(dir, PLAN_LAST_GOOD_FILE);
@@ -471,8 +525,8 @@ export const rollbackPlan = async (snapshotId: string): Promise<OverlayPlan> => 
   if (!entry) {
     throw new Error("Snapshot not found.");
   }
-  const validation = overlayPlanSchema.safeParse(entry.payload.planJson);
-  if (!validation.success) {
+  const validation = resolveWidgetSpecPlan(entry.payload.planJson);
+  if (!validation.ok) {
     throw new Error("Snapshot contains an invalid plan.");
   }
 
@@ -485,8 +539,8 @@ export const rollbackPlan = async (snapshotId: string): Promise<OverlayPlan> => 
 
   const buildUndoChain = (startId: string): string[] => {
     const chain: string[] = [];
-    let cursor = startId;
-    while (true) {
+    let cursor: string | undefined = startId;
+    while (cursor) {
       const current = snapshotMap.get(cursor);
       const base = current?.payload.baseSnapshotId;
       if (!base) {
@@ -510,9 +564,9 @@ export const rollbackPlan = async (snapshotId: string): Promise<OverlayPlan> => 
   );
 
   await writeJson(join(dir, PLAN_HISTORY_FILE), nextHistory);
-  await writeJson(backupPath, validation.data as OverlayPlan);
-  await writeJson(planPath, validation.data as OverlayPlan);
-  return validation.data as OverlayPlan;
+  await writeJson(backupPath, validation.plan);
+  await writeJson(planPath, validation.plan);
+  return validation.plan;
 };
 
 export const loadEventLog = async (): Promise<EventLog> => {

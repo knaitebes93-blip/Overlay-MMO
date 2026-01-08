@@ -28,7 +28,6 @@ import {
   MemoryEntry,
   MemoryStore,
   OcrResult,
-  OverlayPlan,
   OverlaySettings,
   PlannerComposeInput,
   PlanSaveMeta,
@@ -837,21 +836,15 @@ const registerIpc = () => {
 
   ipcMain.handle("plan:load", async () => loadPlan());
 
-  ipcMain.handle("plan:save", async (_event, plan: OverlayPlan, meta?: PlanSaveMeta) => {
-    await savePlan(plan, meta);
+  ipcMain.handle("plan:save", async (_event, plan: unknown, meta?: PlanSaveMeta) => {
+    return savePlan(plan, meta);
   });
 
-  ipcMain.handle("plan:rollback", async (_event, snapshotId: string): Promise<OverlayPlan> => {
-    return rollbackPlan(snapshotId);
-  });
+  ipcMain.handle("plan:rollback", async (_event, snapshotId: string) => rollbackPlan(snapshotId));
 
-  ipcMain.handle("plan:undo", async (): Promise<OverlayPlan> => {
-    return undoPlan();
-  });
+  ipcMain.handle("plan:undo", async () => undoPlan());
 
-  ipcMain.handle("plan:redo", async (): Promise<OverlayPlan> => {
-    return redoPlan();
-  });
+  ipcMain.handle("plan:redo", async () => redoPlan());
 
   ipcMain.handle(
     "planner:compose",

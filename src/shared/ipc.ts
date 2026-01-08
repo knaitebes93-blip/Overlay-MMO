@@ -1,3 +1,5 @@
+import type { WidgetSpec } from "../widgetSpec";
+
 export type OverlaySettings = {
   bounds: { x: number; y: number; width: number; height: number } | null;
   displayId: number | null;
@@ -35,9 +37,9 @@ export type MemoryEntryType =
 
 export type PlanSnapshotPayload = {
   snapshotId: string;
-  planJson: OverlayPlan;
+  planJson: WidgetSpec;
   reason: string;
-  actor: "user" | "rules";
+  actor: "user" | "rules" | "system";
   baseSnapshotId?: string;
 };
 
@@ -137,7 +139,7 @@ export type PlannerComposeResult = {
 
 export type PlanSaveMeta = {
   reason?: string;
-  actor?: "user" | "rules";
+  actor?: "user" | "rules" | "system";
 };
 
 export type EventLogEntry = {
@@ -201,7 +203,7 @@ export type CaptureSnapshotResult = {
 };
 
 export type PlanLoadResult = {
-  plan: OverlayPlan | null;
+  plan: WidgetSpec | null;
   warning?: string;
 };
 
@@ -283,10 +285,10 @@ export type OverlayAPI = {
   getDisplays: () => Promise<DisplayInfo[]>;
   setDisplay: (displayId: number) => Promise<void>;
   loadPlan: () => Promise<PlanLoadResult>;
-  savePlan: (plan: OverlayPlan, meta?: PlanSaveMeta) => Promise<void>;
-  undoPlan: () => Promise<OverlayPlan>;
-  redoPlan: () => Promise<OverlayPlan>;
-  rollbackPlan: (snapshotId: string) => Promise<OverlayPlan>;
+  savePlan: (plan: OverlayPlan | WidgetSpec, meta?: PlanSaveMeta) => Promise<WidgetSpec>;
+  undoPlan: () => Promise<WidgetSpec>;
+  redoPlan: () => Promise<WidgetSpec>;
+  rollbackPlan: (snapshotId: string) => Promise<WidgetSpec>;
   composePlan: (input: PlannerComposeInput) => Promise<PlannerComposeResult>;
   loadEventLog: () => Promise<EventLog>;
   saveEventLog: (log: EventLog) => Promise<void>;

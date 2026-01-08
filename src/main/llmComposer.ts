@@ -5,7 +5,7 @@ import {
   PlannerComposeResult,
   RulesStore
 } from "../shared/ipc";
-import { overlayPlanSchema } from "../shared/planSchema";
+import { runPlanValidations } from "../shared/planValidation";
 import { rulesStoreSchema } from "../shared/rulesSchema";
 
 const DEFAULT_MODEL = "gpt-4o-mini";
@@ -316,10 +316,12 @@ export const composeWithLlm = async (
     );
   }
 
-  const planValidation = overlayPlanSchema.safeParse(candidatePlan);
-  if (!planValidation.success) {
+  const planValidation = runPlanValidations(candidatePlan);
+  if (!planValidation.overlay.success) {
     throw new Error(
-      `LLM returned an invalid plan: ${planValidation.error.errors.map((err) => err.message).join("; ")}`
+      `LLM returned an invalid plan: ${planValidation.overlay.error.errors
+        .map((err) => err.message)
+        .join("; ")}`
     );
   }
 
@@ -331,7 +333,7 @@ export const composeWithLlm = async (
   }
 
   return {
-    plan: planValidation.data as OverlayPlan,
+    plan: planValidation.overlay.data as OverlayPlan,
     rules: rulesValidation.data as RulesStore,
     note:
       (parsedObject?.note as string | undefined) ?? "LLM composed a new plan."
