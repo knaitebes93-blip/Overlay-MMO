@@ -5,7 +5,18 @@ const baseWidget = z.object({
   title: z.string().optional()
 });
 
-let widgetSchema: z.ZodTypeAny;
+export const widgetSchema: z.ZodTypeAny = z.lazy(() =>
+  z.discriminatedUnion("type", [
+    textWidgetSchema,
+    counterWidgetSchema,
+    timerWidgetSchema,
+    checklistWidgetSchema,
+    panelWidgetSchema,
+    eventLogWidgetSchema,
+    rateWidgetSchema,
+    projectionWidgetSchema
+  ])
+);
 
 export const textWidgetSchema = baseWidget.extend({
   type: z.literal("text"),
@@ -37,7 +48,7 @@ export const checklistWidgetSchema = baseWidget.extend({
 
 export const panelWidgetSchema = baseWidget.extend({
   type: z.literal("panel"),
-  children: z.array(z.lazy(() => widgetSchema))
+  children: z.array(widgetSchema)
 });
 
 export const eventLogWidgetSchema = baseWidget.extend({
@@ -58,19 +69,6 @@ export const projectionWidgetSchema = baseWidget.extend({
   lookbackMinutes: z.number().int().min(1),
   horizonMinutes: z.number().int().min(1)
 });
-
-widgetSchema = z.discriminatedUnion("type", [
-  textWidgetSchema,
-  counterWidgetSchema,
-  timerWidgetSchema,
-  checklistWidgetSchema,
-  panelWidgetSchema,
-  eventLogWidgetSchema,
-  rateWidgetSchema,
-  projectionWidgetSchema
-]);
-
-export { widgetSchema };
 
 export const overlayPlanSchema = z.object({
   version: z.literal("1.0"),

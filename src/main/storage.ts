@@ -10,12 +10,18 @@ const SETTINGS_FILE = "settings.json";
 const PLAN_FILE = "plan.json";
 const PLAN_LAST_GOOD_FILE = "plan.last-good.json";
 const EVENT_LOG_FILE = "event-log.json";
+const CAPTURE_DIR = "captures";
+const CAPTURE_MAX_FILES = 10;
 
 const defaultSettings: OverlaySettings = {
   bounds: null,
   displayId: null,
   opacity: 0.92,
-  clickThrough: false
+  clickThrough: false,
+  captureEnabled: false,
+  captureSourceType: null,
+  captureSourceId: null,
+  captureRoi: null
 };
 
 const defaultEventLog: EventLog = {
@@ -65,9 +71,21 @@ const writeJson = async <T>(file: string, data: T): Promise<void> => {
   await fs.writeFile(file, JSON.stringify(data, null, 2), "utf-8");
 };
 
+const sanitizeSegment = (value: string): string =>
+  value.replace(/[^a-z0-9-_]+/gi, "_").replace(/^_+|_+$/g, "");
+
 export const loadSettings = async (): Promise<OverlaySettings> => {
   const dir = await ensureProfileDir();
-  return readJson(join(dir, SETTINGS_FILE), defaultSettings);
+  const stored = await readJson(join(dir, SETTINGS_FILE), defaultSettings);
+  const merged = { ...defaultSettings, ...stored, captureEnabled: false };
+  if ((stored as Partial<OverlaySettings>).captureEnabled) {
+    try {
+      await writeJson(join(dir, SETTINGS_FILE), merged);
+    } catch {
+      // ignore persistence failures; capture stays disabled in memory
+    }
+  }
+  return merged;
 };
 
 export const saveSettings = async (settings: OverlaySettings): Promise<void> => {
@@ -167,4 +185,34 @@ export const saveEventLog = async (log: EventLog): Promise<void> => {
   }
   const dir = await ensureProfileDir();
   await writeJson(join(dir, EVENT_LOG_FILE), validation.data as EventLog);
+};
+
+export const saveCapture = async (
+  image: Buffer,
+  sourceId: string,
+  capturedAt: number
+): Promise<string> => {
+  const dir = await ensureProfileDir();
+  const captureDir = join(dir, CAPTURE_DIR);
+  await fs.mkdir(captureDir, { recursive: true });
+  const safeSource = sanitizeSegment(sourceId) || "screen";
+  const timestamp = new Date(capturedAt).toISOString().replace(/[:.]/g, "-");
+  const fileName = `${timestamp}-${safeSource}.png`;
+  const filePath = join(captureDir, fileName);
+  await fs.writeFile(filePath, image);
+  try {
+    const entries = await fs.readdir(captureDir);
+    const captures = entries
+      .filter((entry) => entry.toLowerCase().endsWith(".png"))
+      .sort();
+    if (captures.length > CAPTURE_MAX_FILES) {
+      const excess = captures.slice(0, captures.length - CAPTURE_MAX_FILES);
+      await Promise.all(
+        excess.map((entry) => fs.unlink(join(captureDir, entry)).catch(() => undefined))
+      );
+    }
+  } catch {
+    // Ignore retention failures to keep capture flow safe.
+  }
+  return filePath;
 };

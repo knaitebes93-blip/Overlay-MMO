@@ -30,6 +30,14 @@ const formatRelativeTime = (timestamp: number) => {
   return `${days}d ago`;
 };
 
+const formatEntryNote = (entry: EventLogEntry) => {
+  const base = entry.note ?? entry.data?.text ?? "Logged event";
+  if (base.length <= 140) {
+    return base;
+  }
+  return `${base.slice(0, 137)}...`;
+};
+
 const EventLogWidget = ({ widget, eventLog, onAddEntry, onUpdate }: Props) => {
   const [note, setNote] = useState("");
   const [eventTypeInput, setEventTypeInput] = useState(widget.eventType);
@@ -117,7 +125,7 @@ const EventLogWidget = ({ widget, eventLog, onAddEntry, onUpdate }: Props) => {
           {visibleEntries.map((entry) => (
             <li key={entry.id}>
               <span className="event-log-time">{formatRelativeTime(entry.timestamp)}</span>
-              <span className="event-log-note">{entry.note ?? "Logged event"}</span>
+              <span className="event-log-note">{formatEntryNote(entry)}</span>
             </li>
           ))}
         </ul>

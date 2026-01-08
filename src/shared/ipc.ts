@@ -3,6 +3,10 @@ export type OverlaySettings = {
   displayId: number | null;
   opacity: number;
   clickThrough: boolean;
+  captureEnabled: boolean;
+  captureSourceType: CaptureSourceType | null;
+  captureSourceId: string | null;
+  captureRoi: CaptureRoi | null;
 };
 
 export type DisplayInfo = {
@@ -21,11 +25,59 @@ export type EventLogEntry = {
   eventType: string;
   timestamp: number;
   note?: string;
+  data?: EventLogEntryData;
 };
 
 export type EventLog = {
   version: "1.0";
   entries: EventLogEntry[];
+};
+
+export type EventLogEntryData = {
+  text?: string;
+  confidence?: number | null;
+  capturePath?: string;
+  sourceName?: string;
+  capturedAt?: number;
+};
+
+export type OcrResult = {
+  text: string;
+  confidence: number | null;
+  capturePath: string;
+  sourceName: string;
+  capturedAt: number;
+  error?: string;
+};
+
+export type CaptureSourceType = "display" | "window";
+
+export type CaptureSource = {
+  id: string;
+  name: string;
+  type: CaptureSourceType;
+  processName?: string;
+};
+
+export type CaptureTarget = {
+  id: string;
+  type: CaptureSourceType;
+};
+
+export type CaptureRoi = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type CaptureSnapshotResult = {
+  capturePath: string;
+  sourceName: string;
+  capturedAt: number;
+  width: number;
+  height: number;
+  dataUrl: string;
 };
 
 export type PlanLoadResult = {
@@ -114,6 +166,10 @@ export type OverlayAPI = {
   savePlan: (plan: OverlayPlan) => Promise<void>;
   loadEventLog: () => Promise<EventLog>;
   saveEventLog: (log: EventLog) => Promise<void>;
+  listCaptureSources: () => Promise<CaptureSource[]>;
+  captureAndProcess: (target: CaptureTarget | null) => Promise<OcrResult | null>;
+  captureSnapshot: (target: CaptureTarget) => Promise<CaptureSnapshotResult>;
+  stopCapture: () => void;
   onEscapeHatch: (callback: () => void) => () => void;
 };
 

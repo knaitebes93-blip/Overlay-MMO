@@ -71,6 +71,15 @@ button:hover {
   border-color: rgba(255, 255, 255, 0.4);
 }
 
+.capture-button.on {
+  border-color: rgba(88, 200, 120, 0.6);
+  color: #d6f5e3;
+}
+
+.capture-button.off {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
 .escape-hatch {
   font-size: 12px;
   opacity: 0.8;
@@ -102,6 +111,68 @@ button:hover {
   width: 100%;
   resize: none;
   margin-bottom: 8px;
+}
+
+.capture-panel {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.capture-panel h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  opacity: 0.85;
+}
+
+.capture-status {
+  margin: 0 0 6px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.capture-error {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: #ffb3b3;
+}
+
+.capture-meta {
+  margin: 0 0 6px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.capture-preview {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.capture-preview.muted {
+  opacity: 0.6;
+}
+
+.capture-source {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.capture-source-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.capture-source-label {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.capture-source select {
+  width: 100%;
 }
 
 .planner-note {
@@ -274,4 +345,71 @@ button:hover {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.roi-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  z-index: 999;
+  -webkit-app-region: no-drag;
+}
+
+.roi-modal-card {
+  width: min(980px, 100%);
+  background: rgba(14, 16, 20, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.4);
+}
+
+.roi-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.roi-modal-help {
+  margin: 0 0 8px;
+  font-size: 12px;
+  opacity: 0.75;
+}
+
+.roi-canvas {
+  position: relative;
+  width: 100%;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(0, 0, 0, 0.25);
+  touch-action: none;
+}
+
+.roi-canvas img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  pointer-events: none;
+}
+
+.roi-rect {
+  position: absolute;
+  border: 2px solid rgba(80, 170, 255, 0.95);
+  background: rgba(80, 170, 255, 0.15);
+  border-radius: 6px;
+}
+
+.roi-modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 10px;
 }

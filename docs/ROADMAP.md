@@ -62,9 +62,9 @@
 - Feeds captures into a passive OCR pipeline.
 
 **Definition of Done**
-- [ ] Screen capture is disabled by default.
-- [ ] Opt-in toggles start/stop capture safely.
-- [ ] OCR pipeline outputs structured text events.
+- [x] Screen capture is disabled by default.
+- [x] Opt-in toggles start/stop capture safely.
+- [x] OCR pipeline outputs structured text events.
 
 **Manual test steps (Windows)**
 1. Enable capture and confirm a clear opt-in prompt is required.
