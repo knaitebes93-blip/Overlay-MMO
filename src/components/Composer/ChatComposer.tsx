@@ -58,13 +58,7 @@ export const ChatComposer = ({
       </button>
     )}
     {builderError && <p className="status-error">{builderError}</p>}
-    {builderDebug && builderDebug.length > 0 && (
-      <div className="status-muted">
-        {builderDebug.map((line, index) => (
-          <div key={`${line}-${index}`}>{line}</div>
-        ))}
-      </div>
-    )}
+    {/* Debug messages removed - errors are shown in builderError */}
     {nextQuestions.length > 0 && (
       <div className="builder-questions">
         <h4>Missing details</h4>

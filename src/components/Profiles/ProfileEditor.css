@@ -1,0 +1,156 @@
+.profile-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 12px;
+  background: #1e1e1e;
+  border: 1px solid #333;
+  border-radius: 4px;
+  color: #e0e0e0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 12px;
+}
+
+.profile-editor.loading {
+  align-items: center;
+  justify-content: center;
+  min-height: 100px;
+  color: #999;
+}
+
+.profile-editor h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+}
+
+.profile-editor-error {
+  background: #5a1818;
+  color: #ff6b6b;
+  padding: 8px;
+  border-radius: 3px;
+  border-left: 3px solid #ff6b6b;
+  font-size: 11px;
+}
+
+.profile-editor-saved {
+  background: #1a4d2e;
+  color: #6bff6b;
+  padding: 8px;
+  border-radius: 3px;
+  border-left: 3px solid #6bff6b;
+  font-size: 11px;
+}
+
+.profile-editor-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.profile-editor-section label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.profile-editor-section input[type="text"],
+.profile-editor-section input[type="time"] {
+  background: #2d2d2d;
+  color: #e0e0e0;
+  border: 1px solid #404040;
+  border-radius: 3px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.profile-editor-section input:focus {
+  outline: none;
+  border-color: #0e639c;
+  box-shadow: 0 0 0 2px rgba(14, 99, 156, 0.2);
+}
+
+.capabilities-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: #2d2d2d;
+  border-radius: 3px;
+}
+
+.capability-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.capability-toggle input[type="checkbox"] {
+  margin-top: 2px;
+  cursor: pointer;
+  width: 16px;
+  height: 16px;
+  accent-color: #0e639c;
+}
+
+.capability-toggle label {
+  flex: 1;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  user-select: none;
+}
+
+.capability-label {
+  font-weight: 500;
+  color: #e0e0e0;
+  font-size: 12px;
+}
+
+.capability-description {
+  font-size: 11px;
+  color: #999;
+}
+
+.profile-editor-actions {
+  display: flex;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #404040;
+}
+
+.profile-editor-btn-save {
+  flex: 1;
+  background: #0e639c;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.profile-editor-btn-save:hover {
+  background: #1177bb;
+}
+
+.profile-editor-btn-cancel {
+  flex: 1;
+  background: #333;
+  color: #e0e0e0;
+  border: none;
+  border-radius: 3px;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.profile-editor-btn-cancel:hover {
+  background: #404040;
+}

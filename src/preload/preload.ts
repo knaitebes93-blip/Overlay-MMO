@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import {
   CaptureSnapshotResult,
   CaptureTarget,
+  Capability,
   EventLog,
   MemoryEntry,
   MemoryStore,
@@ -11,7 +12,8 @@ import {
   PlannerComposeInput,
   PlannerComposeResult,
   PlanSaveMeta,
-  RulesStore
+  RulesStore,
+  Profile
 } from "../shared/ipc";
 import type { WidgetSpec } from "../widgetSpec";
 
@@ -81,7 +83,19 @@ const api: OverlayAPI = {
     const listener = () => callback();
     ipcRenderer.on("app:escape-hatch", listener);
     return () => ipcRenderer.removeListener("app:escape-hatch", listener);
-  }
+  },
+  // Profile management
+  listProfiles: () => ipcRenderer.invoke("profile:list"),
+  getActiveProfile: () => ipcRenderer.invoke("profile:get-active"),
+  createProfile: (name: string, capabilities?: Capability[]) =>
+    ipcRenderer.invoke("profile:create", name, capabilities),
+  updateProfile: (id: string, updates: Partial<Omit<Profile, "id" | "createdAt">>) =>
+    ipcRenderer.invoke("profile:update", id, updates),
+  deleteProfile: (id: string) => ipcRenderer.invoke("profile:delete", id),
+  setActiveProfile: (id: string) => ipcRenderer.invoke("profile:set-active", id),
+  checkCapability: (capability: Capability) => ipcRenderer.invoke("profile:check-capability", capability),
+  enableCapability: (capability: Capability) => ipcRenderer.invoke("profile:enable-capability", capability),
+  disableCapability: (capability: Capability) => ipcRenderer.invoke("profile:disable-capability", capability)
 };
 
 contextBridge.exposeInMainWorld("overlayAPI", api);

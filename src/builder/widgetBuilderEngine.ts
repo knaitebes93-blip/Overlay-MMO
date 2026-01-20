@@ -15,17 +15,29 @@ import {
 } from "./widgetTemplates";
 import { applyAnswersToWidget, buildQuestionsForWidget, Question } from "./questions";
 import { validateWidgetSpec, WidgetSpec, WidgetSpecWidget } from "../widgetSpec";
+import { getCapabilitiesForIntent, getMissingCapabilities, CapabilityRequirement } from "./capabilities";
+import { Capability } from "../types/profile";
 
 export type BuildArgs = {
   message: string;
   profileId: string;
   currentPlan?: WidgetSpec;
   answers?: Record<string, unknown>;
+  profileDefaults?: {
+    currency?: string;
+    numberFormat?: string;
+    dailyResetTime?: string;
+  };
+  profileCapabilities?: Capability[];
 };
 
 export type BuildResult = {
   draftPlan?: WidgetSpec;
   nextQuestions: Question[];
+  capabilityError?: {
+    intent: IntentType;
+    missing: CapabilityRequirement[];
+  };
   debug?: string[];
 };
 
@@ -121,6 +133,21 @@ export const buildPlanFromChat = (args: BuildArgs): BuildResult => {
   const intents = detectIntents(message);
   debug.push(`Intents: ${intents.join(", ")}`);
 
+  // Check capability requirements for all intents
+  const profileCapabilities = args.profileCapabilities ?? [];
+  for (const intent of intents) {
+    const required = getCapabilitiesForIntent(intent);
+    const missing = getMissingCapabilities(profileCapabilities, required);
+    if (missing.length > 0) {
+      debug.push(`Capability check failed for intent: ${intent}`);
+      return {
+        nextQuestions: [],
+        capabilityError: { intent, missing },
+        debug
+      };
+    }
+  }
+
   const hash = fnv1aHash(message.toLowerCase());
   const incomingWidgets = intents.map((intent, index) =>
     buildWidgetForIntent(intent, `${intent}_${hash}_${index + 1}`, message)
@@ -128,7 +155,39 @@ export const buildPlanFromChat = (args: BuildArgs): BuildResult => {
 
   const existingWidgets = args.currentPlan?.widgets ?? [];
   const { widgets, newWidgetIds } = mergeWidgets(existingWidgets, incomingWidgets);
-  const answers = args.answers ?? {};
+  
+  // Merge profile defaults with provided answers
+  const profileDefaults = args.profileDefaults ?? {};
+  const answers = { ...args.answers ?? {} };
+  
+  // Apply profile defaults to questions that need them
+  // (defaults for currency, reset time, number format)
+  if (profileDefaults.currency) {
+    // Try to fill in currency fields from profile default
+    incomingWidgets.forEach((widget) => {
+      const requiredFields = widget.data?.requiredFields as any[] | undefined;
+      if (requiredFields) {
+        requiredFields.forEach((field) => {
+          if (field.key === "currency" || field.key === "currency_type") {
+            answers[`${widget.id}.${field.key}`] = profileDefaults.currency;
+          }
+        });
+      }
+    });
+  }
+  
+  if (profileDefaults.dailyResetTime) {
+    incomingWidgets.forEach((widget) => {
+      const requiredFields = widget.data?.requiredFields as any[] | undefined;
+      if (requiredFields) {
+        requiredFields.forEach((field) => {
+          if (field.key === "daily_reset_time" || field.key === "reset_time") {
+            answers[`${widget.id}.${field.key}`] = profileDefaults.dailyResetTime;
+          }
+        });
+      }
+    });
+  }
 
   const hydrated = widgets.map((widget) => applyAnswersToWidget(widget, answers));
 

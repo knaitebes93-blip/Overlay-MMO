@@ -1,4 +1,7 @@
 import type { WidgetSpec } from "../widgetSpec";
+import type { Profile, Capability } from "../types/profile";
+
+export type { Profile, Capability };
 
 export type OverlaySettings = {
   bounds: { x: number; y: number; width: number; height: number } | null;
@@ -303,6 +306,16 @@ export type OverlayAPI = {
   captureSnapshot: (target: CaptureTarget) => Promise<CaptureSnapshotResult>;
   stopCapture: () => void;
   onEscapeHatch: (callback: () => void) => () => void;
+  // Profile management
+  listProfiles: () => Promise<Profile[]>;
+  getActiveProfile: () => Promise<Profile>;
+  createProfile: (name: string, capabilities?: Capability[]) => Promise<Profile>;
+  updateProfile: (id: string, updates: Partial<Omit<Profile, "id" | "createdAt">>) => Promise<Profile>;
+  deleteProfile: (id: string) => Promise<void>;
+  setActiveProfile: (id: string) => Promise<Profile>;
+  checkCapability: (capability: Capability) => Promise<boolean>;
+  enableCapability: (capability: Capability) => Promise<Profile>;
+  disableCapability: (capability: Capability) => Promise<Profile>;
 };
 
 declare global {

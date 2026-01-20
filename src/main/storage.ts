@@ -9,15 +9,19 @@ import {
   OverlaySettings,
   PlanSaveMeta,
   PlanLoadResult,
-  RulesStore
+  RulesStore,
+  OverlayPlan
 } from "../shared/ipc";
 import { eventLogSchema } from "../shared/eventLogSchema";
 import { memoryEntrySchema, memoryStoreSchema } from "../shared/memorySchema";
 import { rulesStoreSchema } from "../shared/rulesSchema";
 import { migrateLegacyPlan, validateWidgetSpec, WidgetSpec } from "../widgetSpec";
+import { Profile, ProfileStore as ProfileStoreType } from "../types/profile";
+import { overlayPlanToWidgetSpec } from "../state/planStore";
 
 const PROFILE_NAME = "default";
 const SETTINGS_FILE = "settings.json";
+const PROFILES_FILE = "profiles.json";
 const PLAN_FILE = "plan.json";
 const PLAN_LAST_GOOD_FILE = "plan.last-good.json";
 const PLAN_HISTORY_FILE = "plan.history.json";
@@ -725,4 +729,302 @@ export const saveCapture = async (
     // Ignore retention failures to keep capture flow safe.
   }
   return filePath;
+};
+
+/**
+ * Profile persistence - manages multi-profile scoped storage
+ */
+
+export const loadProfiles = async (): Promise<ProfileStoreType> => {
+  const dir = await ensureProfileDir();
+  const filePath = join(dir, PROFILES_FILE);
+
+  const defaults: ProfileStoreType = {
+    version: "1.0",
+    profiles: [
+      {
+        id: "profile_default",
+        name: "Default",
+        capabilities: ["manual_inputs", "ocr_snapshot", "clipboard_parse", "log_import"],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }
+    ],
+    activeProfileId: "profile_default"
+  };
+
+  try {
+    const raw = await fs.readFile(filePath, "utf-8");
+    const data = JSON.parse(raw) as ProfileStoreType;
+    if (
+      data &&
+      typeof data === "object" &&
+      "version" in data &&
+      data.version === "1.0" &&
+      "profiles" in data &&
+      Array.isArray(data.profiles) &&
+      "activeProfileId" in data
+    ) {
+      return data;
+    }
+  } catch {
+    // Fall through to defaults
+  }
+
+  return defaults;
+};
+
+export const saveProfiles = async (store: ProfileStoreType): Promise<void> => {
+  const dir = await ensureProfileDir();
+  const filePath = join(dir, PROFILES_FILE);
+  await writeJson(filePath, store);
+};
+
+/**
+ * Get profile-scoped directory
+ */
+const getProfileDir = async (profileId: string): Promise<string> => {
+  const parentDir = join(app.getPath("userData"), "profiles");
+  const sanitized = sanitizeSegment(profileId) || "default";
+  const dir = join(parentDir, sanitized);
+  await fs.mkdir(dir, { recursive: true });
+  return dir;
+};
+
+/**
+ * Load plan for a specific profile
+ */
+export const loadPlanForProfile = async (profileId: string): Promise<PlanLoadResult> => {
+  const dir = await getProfileDir(profileId);
+  const planFile = join(dir, PLAN_FILE);
+  const planLastGoodFile = join(dir, PLAN_LAST_GOOD_FILE);
+  const planHistoryFile = join(dir, PLAN_HISTORY_FILE);
+
+  const { data: planData, missing: planMissing } = await readJsonUnknown(planFile);
+
+  if (planMissing) {
+    return { plan: null };
+  }
+
+  const validation = validateWidgetSpec(planData);
+
+  if (validation.ok) {
+    return { plan: validation.value };
+  }
+
+  const lastGoodData = await readJson(planLastGoodFile, null);
+  if (lastGoodData && typeof lastGoodData === "object") {
+    const migration = migrateLegacyPlan(lastGoodData, profileId);
+    if (migration.ok) {
+      return {
+        plan: migration.value,
+        warning: `Loaded last-known-good plan: ${migration.warnings?.[0] ?? "no details"}`
+      };
+    }
+  }
+
+  return {
+    plan: null,
+    warning: `Plan validation failed: ${validation.error ?? "unknown"}`
+  };
+};
+
+/**
+ * Save plan for a specific profile
+ */
+export const savePlanForProfile = async (
+  profileId: string,
+  plan: OverlayPlan | WidgetSpec,
+  meta?: PlanSaveMeta
+): Promise<WidgetSpec> => {
+  const dir = await getProfileDir(profileId);
+  const planFile = join(dir, PLAN_FILE);
+  const planLastGoodFile = join(dir, PLAN_LAST_GOOD_FILE);
+  const planHistoryFile = join(dir, PLAN_HISTORY_FILE);
+  const memoryFile = join(dir, MEMORY_FILE);
+
+  const overlayPlan = "widgets" in plan && typeof (plan as any).widgets === "object" ? (plan as OverlayPlan) : null;
+  const isOverlayPlan = !!overlayPlan;
+
+  const widgetSpec: WidgetSpec = isOverlayPlan
+    ? overlayPlanToWidgetSpec(overlayPlan as OverlayPlan, profileId)
+    : (plan as WidgetSpec);
+
+  const validation = validateWidgetSpec(widgetSpec);
+
+  if (!validation.ok) {
+    throw new Error(`Plan validation failed: ${validation.error}`);
+  }
+
+  const validPlan = validation.value;
+  await writeJson(planFile, validPlan);
+
+  try {
+    const memory = await readJson(memoryFile, defaultMemory);
+    if (!memoryStoreSchema.safeParse(memory).success) {
+      await writeJson(memoryFile, defaultMemory);
+    }
+  } catch {
+    await writeJson(memoryFile, defaultMemory);
+  }
+
+  const snapshotId = buildSnapshotId();
+  const snapshot: MemoryEntry = {
+    id: `entry_${snapshotId}`,
+    profileId,
+    type: "plan_snapshot",
+    createdAt: Date.now(),
+    source: meta?.actor === "system" ? "system" : meta?.actor === "rules" ? "system" : "user",
+    payload: {
+      snapshotId,
+      planJson: validPlan,
+      reason: meta?.reason ?? "Plan saved",
+      actor: meta?.actor ?? "user"
+    }
+  };
+
+  const currentMemory = await readJson(memoryFile, defaultMemory);
+  const sanitized = sanitizeMemoryStore({
+    ...currentMemory,
+    entries: [...currentMemory.entries, snapshot]
+  });
+  await writeJson(memoryFile, sanitized);
+
+  try {
+    await writeJson(planLastGoodFile, validPlan);
+  } catch {
+    // Ignore last-good write failures
+  }
+
+  try {
+    const historyData = await readJson(planHistoryFile, {
+      version: "1.0" as const,
+      currentSnapshotId: null,
+      undo: [] as string[],
+      redo: [] as string[]
+    });
+
+    const entries = sanitized.entries;
+    const pruned = prunePlanHistory(historyData, entries, snapshotId);
+
+    const updated: PlanHistory = {
+      version: "1.0",
+      currentSnapshotId: snapshotId,
+      undo: [pruned.currentSnapshotId, ...pruned.undo].filter((id): id is string => id !== null),
+      redo: []
+    };
+
+    await writeJson(planHistoryFile, updated);
+  } catch {
+    // Ignore history update failures
+  }
+
+  return validPlan;
+};
+
+/**
+ * Load memory for a specific profile
+ */
+export const loadMemoryForProfile = async (profileId: string): Promise<MemoryStore> => {
+  const dir = await getProfileDir(profileId);
+  const file = join(dir, MEMORY_FILE);
+
+  const stored = await readJson(file, defaultMemory);
+
+  const parseResult = memoryStoreSchema.safeParse(stored);
+  if (parseResult.success) {
+    const filtered: MemoryStore = {
+      version: "1.0",
+      entries: parseResult.data.entries.filter((entry) => (entry as any).profileId === profileId) as MemoryEntry[]
+    };
+    return filtered;
+  }
+
+  // Handle legacy format (no profileId field)
+  const legacyResult = legacyMemoryStoreSchema.safeParse(stored);
+  if (legacyResult.success) {
+    const migrated: MemoryStore = {
+      version: "1.0",
+      entries: legacyResult.data.entries.map((entry) => ({
+        ...entry,
+        profileId,
+        source: "user" as const,
+        type: "note" as const,
+        payload: { text: entry.text }
+      }))
+    };
+    return migrated;
+  }
+
+  return defaultMemory;
+};
+
+/**
+ * Save memory for a specific profile
+ */
+export const saveMemoryForProfile = async (profileId: string, store: MemoryStore): Promise<void> => {
+  const dir = await getProfileDir(profileId);
+  const file = join(dir, MEMORY_FILE);
+
+  const filtered: MemoryStore = {
+    version: "1.0",
+    entries: store.entries.filter((entry) => entry.profileId === profileId)
+  };
+
+  const sanitized = sanitizeMemoryStore(filtered);
+  await writeJson(file, sanitized);
+};
+
+/**
+ * Load event log for a specific profile
+ */
+export const loadEventLogForProfile = async (profileId: string): Promise<EventLog> => {
+  const dir = await getProfileDir(profileId);
+  const file = join(dir, EVENT_LOG_FILE);
+
+  const stored = await readJson(file, defaultEventLog);
+
+  const parseResult = eventLogSchema.safeParse(stored);
+  if (parseResult.success) {
+    return parseResult.data;
+  }
+
+  return defaultEventLog;
+};
+
+/**
+ * Save event log for a specific profile
+ */
+export const saveEventLogForProfile = async (profileId: string, log: EventLog): Promise<void> => {
+  const dir = await getProfileDir(profileId);
+  const file = join(dir, EVENT_LOG_FILE);
+
+  await writeJson(file, log);
+};
+
+/**
+ * Load rules for a specific profile
+ */
+export const loadRulesForProfile = async (profileId: string): Promise<RulesStore> => {
+  const dir = await getProfileDir(profileId);
+  const file = join(dir, RULES_FILE);
+
+  const stored = await readJson(file, defaultRules);
+
+  const parseResult = rulesStoreSchema.safeParse(stored);
+  if (parseResult.success) {
+    return parseResult.data;
+  }
+
+  return defaultRules;
+};
+
+/**
+ * Save rules for a specific profile
+ */
+export const saveRulesForProfile = async (profileId: string, store: RulesStore): Promise<void> => {
+  const dir = await getProfileDir(profileId);
+  const file = join(dir, RULES_FILE);
+
+  await writeJson(file, store);
 };

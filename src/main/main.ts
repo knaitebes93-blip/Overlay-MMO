@@ -16,7 +16,17 @@ import {
   savePlan,
   saveRules,
   saveSettings,
-  undoPlan
+  undoPlan,
+  loadProfiles,
+  saveProfiles,
+  loadPlanForProfile,
+  savePlanForProfile,
+  loadMemoryForProfile,
+  saveMemoryForProfile,
+  loadEventLogForProfile,
+  saveEventLogForProfile,
+  loadRulesForProfile,
+  saveRulesForProfile
 } from "./storage";
 import {
   CaptureSource,
@@ -31,7 +41,8 @@ import {
   OverlaySettings,
   PlannerComposeInput,
   PlanSaveMeta,
-  RulesStore
+  RulesStore,
+  Capability
 } from "../shared/ipc";
 import { runOcr, shutdownOcrWorker } from "./ocr";
 import * as ocrPreprocess from "./ocrPreprocess";
@@ -39,9 +50,11 @@ import { logError, logInfo } from "./logging";
 import { composeWithLlm } from "./llmComposer";
 import screenshotDesktop from "screenshot-desktop";
 import { execFile } from "child_process";
+import { createProfileStore, ProfileStore } from "../state/profileStore";
 
 let overlayWindow: BrowserWindow | null = null;
 let cachedSettings: OverlaySettings | null = null;
+let profileStore: ProfileStore | null = null;
 
 const escapeShortcut = "Control+Shift+O";
 const OCR_MAX_WIDTH = 1920;
@@ -834,10 +847,16 @@ const registerIpc = () => {
     }
   });
 
-  ipcMain.handle("plan:load", async () => loadPlan());
+  ipcMain.handle("plan:load", async () => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const activeProfile = profileStore.getActiveProfile();
+    return loadPlanForProfile(activeProfile.id);
+  });
 
   ipcMain.handle("plan:save", async (_event, plan: unknown, meta?: PlanSaveMeta) => {
-    return savePlan(plan, meta);
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const activeProfile = profileStore.getActiveProfile();
+    return savePlanForProfile(activeProfile.id, plan as any, meta);
   });
 
   ipcMain.handle("plan:rollback", async (_event, snapshotId: string) => rollbackPlan(snapshotId));
@@ -857,34 +876,52 @@ const registerIpc = () => {
     }
   );
 
-  ipcMain.handle("event-log:load", async () => loadEventLog());
+  ipcMain.handle("event-log:load", async () => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const activeProfile = profileStore.getActiveProfile();
+    return loadEventLogForProfile(activeProfile.id);
+  });
 
   ipcMain.handle("event-log:save", async (_event, log: EventLog) => {
-    await saveEventLog(log);
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const activeProfile = profileStore.getActiveProfile();
+    await saveEventLogForProfile(activeProfile.id, log);
   });
 
   ipcMain.handle("memory:load", async (): Promise<MemoryStore> => {
-    return loadMemory();
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const activeProfile = profileStore.getActiveProfile();
+    return loadMemoryForProfile(activeProfile.id);
   });
 
   ipcMain.handle("memory:save", async (_event, store: MemoryStore) => {
-    await saveMemory(store);
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const activeProfile = profileStore.getActiveProfile();
+    await saveMemoryForProfile(activeProfile.id, store);
   });
 
   ipcMain.handle("memory:add", async (_event, entry: MemoryEntry): Promise<MemoryStore> => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const activeProfile = profileStore.getActiveProfile();
     return addMemoryEntry(entry);
   });
 
   ipcMain.handle("memory:delete", async (_event, entryId: string): Promise<MemoryStore> => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const activeProfile = profileStore.getActiveProfile();
     return deleteMemoryEntry(entryId);
   });
 
   ipcMain.handle("rules:load", async (): Promise<RulesStore> => {
-    return loadRules();
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const activeProfile = profileStore.getActiveProfile();
+    return loadRulesForProfile(activeProfile.id);
   });
 
   ipcMain.handle("rules:save", async (_event, store: RulesStore) => {
-    await saveRules(store);
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const activeProfile = profileStore.getActiveProfile();
+    await saveRulesForProfile(activeProfile.id, store);
   });
 
   ipcMain.handle("capture:list-sources", async (): Promise<CaptureSource[]> => {
@@ -1021,10 +1058,72 @@ const registerIpc = () => {
     }
   });
 
+  // Profile management
+  ipcMain.handle("profile:list", async () => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    return profileStore.getProfiles();
+  });
+
+  ipcMain.handle("profile:get-active", async () => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    return profileStore.getActiveProfile();
+  });
+
+  ipcMain.handle("profile:create", async (_event, name: string, capabilities?: Capability[]) => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const profile = profileStore.createProfile(name, capabilities);
+    await saveProfiles(profileStore.toStorageFormat());
+    return profile;
+  });
+
+  ipcMain.handle("profile:update", async (_event, id: string, updates: unknown) => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const profile = profileStore.updateProfile(id, updates as any);
+    await saveProfiles(profileStore.toStorageFormat());
+    return profile;
+  });
+
+  ipcMain.handle("profile:delete", async (_event, id: string) => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    profileStore.deleteProfile(id);
+    await saveProfiles(profileStore.toStorageFormat());
+  });
+
+  ipcMain.handle("profile:set-active", async (_event, id: string) => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    profileStore.setActiveProfile(id);
+    await saveProfiles(profileStore.toStorageFormat());
+    return profileStore.getActiveProfile();
+  });
+
+  ipcMain.handle("profile:check-capability", async (_event, capability: Capability) => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    return profileStore.hasCapability(capability);
+  });
+
+  ipcMain.handle("profile:enable-capability", async (_event, capability: Capability) => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const profile = profileStore.enableCapability(capability);
+    await saveProfiles(profileStore.toStorageFormat());
+    return profile;
+  });
+
+  ipcMain.handle("profile:disable-capability", async (_event, capability: Capability) => {
+    if (!profileStore) throw new Error("Profile store not initialized");
+    const profile = profileStore.disableCapability(capability);
+    await saveProfiles(profileStore.toStorageFormat());
+    return profile;
+  });
+
   // capture:process removed (capture handled in main via capture:request).
 };
 
 app.on("ready", async () => {
+  const stored = await loadProfiles();
+  profileStore = createProfileStore({
+    profiles: stored.profiles,
+    activeProfileId: stored.activeProfileId
+  });
   registerIpc();
   await createOverlayWindow();
 });

@@ -7,5 +7,5 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src/renderer/**/*", "src/shared/**/*"]
+  "include": ["src/renderer/**/*", "src/components/**/*", "src/builder/**/*", "src/shared/**/*", "src/types/**/*", "src/widgetSpec/**/*", "src/state/**/*"]
 }

@@ -26,6 +26,8 @@ import { WidgetSpec } from "../widgetSpec";
 import { defaultPlan, plannerStub } from "./planner";
 import PlanRenderer from "./PlanRenderer";
 import { ChatComposer } from "../components/Composer/ChatComposer";
+import { ProfileSelector } from "../components/Profiles/ProfileSelector";
+import { ProfileEditor } from "../components/Profiles/ProfileEditor";
 import {
   applyPlan,
   buildFallbackWidgetSpec,
@@ -2213,10 +2215,8 @@ const App = () => {
 
                   {inspectorTab === "profiles" && (
                     <div className="panel-section">
-                      <h3>Profiles</h3>
-                      <p className="status-muted">
-                        Active profile: default. Profile management is coming soon.
-                      </p>
+                      <ProfileSelector />
+                      <ProfileEditor />
                     </div>
                   )}
                 </div>
