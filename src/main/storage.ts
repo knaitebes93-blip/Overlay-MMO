@@ -66,7 +66,33 @@ const defaultMemory: MemoryStore = {
 
 const defaultRules: RulesStore = {
   version: "1.0",
-  rules: []
+  rules: [
+    {
+      id: "rule-exp-current",
+      enabled: true,
+      mode: "regex",
+      pattern: "EXP\\s*[:=]?\\s*(\\d+(?:[.,]\\d+)?)",
+      action: {
+        type: "setTextWidget",
+        widgetId: "text-exp-current",
+        template: "EXP ${g1}"
+      }
+    },
+    {
+      id: "rule-exp-rate",
+      enabled: true,
+      mode: "regex",
+      pattern: "EXP\\s*[:=]?\\s*(\\d+(?:[.,]\\d+)?)",
+      action: {
+        type: "trackRate",
+        widgetId: "text-exp-rate",
+        template: "EXP/h ${rate}",
+        valueSource: "g1",
+        precision: 2,
+        minSeconds: 60
+      }
+    }
+  ]
 };
 
 const legacyMemoryEntrySchema = z.object({

@@ -59,7 +59,36 @@ const OCR_PREVIEW_LIMIT = 140;
 
 const emptyEventLog: EventLog = { version: "1.0", entries: [] };
 const emptyMemory: MemoryStore = { version: "1.0", entries: [] };
-const emptyRules: RulesStore = { version: "1.0", rules: [] };
+const defaultRules: RulesStore = {
+  version: "1.0",
+  rules: [
+    {
+      id: "rule-exp-current",
+      enabled: true,
+      mode: "regex",
+      pattern: "EXP\\s*[:=]?\\s*(\\d+(?:[.,]\\d+)?)",
+      action: {
+        type: "setTextWidget",
+        widgetId: "text-exp-current",
+        template: "EXP ${g1}"
+      }
+    },
+    {
+      id: "rule-exp-rate",
+      enabled: true,
+      mode: "regex",
+      pattern: "EXP\\s*[:=]?\\s*(\\d+(?:[.,]\\d+)?)",
+      action: {
+        type: "trackRate",
+        widgetId: "text-exp-rate",
+        template: "EXP/h ${rate}",
+        valueSource: "g1",
+        precision: 2,
+        minSeconds: 60
+      }
+    }
+  ]
+};
 const PROFILE_ID = "default";
 
 const llmDefaults: Record<LlmProvider, { baseUrl: string; model: string; apiKey?: string }> = {
@@ -220,7 +249,7 @@ const App = () => {
   const [memoryStore, setMemoryStore] = useState<MemoryStore>(emptyMemory);
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [memoryInput, setMemoryInput] = useState("");
-  const [rulesStore, setRulesStore] = useState<RulesStore>(emptyRules);
+  const [rulesStore, setRulesStore] = useState<RulesStore>(defaultRules);
   const [rulesError, setRulesError] = useState<string | null>(null);
   const [llmError, setLlmError] = useState<string | null>(null);
   const [ruleMode, setRuleMode] = useState<Rule["mode"]>("includes");
@@ -229,6 +258,10 @@ const App = () => {
   const [ruleWidgetId, setRuleWidgetId] = useState("");
   const [ruleTemplate, setRuleTemplate] = useState("${text}");
   const [ruleAmount, setRuleAmount] = useState(1);
+  const [ruleValueSource, setRuleValueSource] = useState<"match0" | "g1">("g1");
+  const [ruleUnit, setRuleUnit] = useState("");
+  const [rulePrecision, setRulePrecision] = useState(2);
+  const [ruleMinSeconds, setRuleMinSeconds] = useState(60);
   const [captureStatus, setCaptureStatus] = useState("Capture off.");
   const [captureError, setCaptureError] = useState<string | null>(null);
   const [captureSources, setCaptureSources] = useState<CaptureSource[]>([]);
@@ -333,10 +366,8 @@ const App = () => {
           setPlan(overlayPlan);
           setLastValidPlan(overlayPlan);
         } else {
-          const fallbackSpec = buildFallbackWidgetSpec(
-            PROFILE_ID,
-            "No plan loaded. Created a minimal WidgetSpec plan."
-          );
+          const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
+          const fallbackSpec = overlayPlanToWidgetSpec(defaultPlanMemo, profileId);
           const overlayPlan = widgetSpecToOverlayPlan(fallbackSpec);
           setWidgetSpecPlan(fallbackSpec);
           setLastKnownGoodWidgetSpec(fallbackSpec);
@@ -347,10 +378,8 @@ const App = () => {
           await overlayAPI.savePlan(fallbackSpec, { reason: "bootstrap", actor: "system" });
         }
       } else {
-        const fallbackSpec = buildFallbackWidgetSpec(
-          PROFILE_ID,
-          "Failed to load plan. Created a minimal WidgetSpec plan."
-        );
+        const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
+        const fallbackSpec = overlayPlanToWidgetSpec(defaultPlanMemo, profileId);
         const overlayPlan = widgetSpecToOverlayPlan(fallbackSpec);
         setWidgetSpecPlan(fallbackSpec);
         setLastKnownGoodWidgetSpec(fallbackSpec);
@@ -401,11 +430,11 @@ const App = () => {
           setRulesStore(loadedRules);
           setRulesError(null);
         } catch (error: unknown) {
-          setRulesStore(emptyRules);
+          setRulesStore(defaultRules);
           setRulesError(error instanceof Error ? error.message : "Failed to load rules.");
         }
       } else {
-        setRulesStore(emptyRules);
+        setRulesStore(defaultRules);
         setRulesError("Rules API not available. Restart Electron to load updated IPC handlers.");
       }
     };
@@ -863,6 +892,9 @@ const App = () => {
     if (rule.action.type === "setTextWidget" && !rule.action.template.trim()) {
       return "Template is required.";
     }
+    if (rule.action.type === "trackRate" && !rule.action.template.trim()) {
+      return "Template is required.";
+    }
     return null;
   };
 
@@ -876,13 +908,29 @@ const App = () => {
             pattern: rulePattern,
             action: { type: "incrementCounter", widgetId: ruleWidgetId, amount: ruleAmount }
           }
-        : {
-            id: buildRuleId(),
-            enabled: true,
-            mode: ruleMode,
-            pattern: rulePattern,
-            action: { type: "setTextWidget", widgetId: ruleWidgetId, template: ruleTemplate }
-          };
+        : ruleActionType === "trackRate"
+          ? {
+              id: buildRuleId(),
+              enabled: true,
+              mode: ruleMode,
+              pattern: rulePattern,
+              action: {
+                type: "trackRate",
+                widgetId: ruleWidgetId,
+                template: ruleTemplate,
+                valueSource: ruleValueSource,
+                unit: ruleUnit.trim() || undefined,
+                precision: rulePrecision,
+                minSeconds: ruleMinSeconds
+              }
+            }
+          : {
+              id: buildRuleId(),
+              enabled: true,
+              mode: ruleMode,
+              pattern: rulePattern,
+              action: { type: "setTextWidget", widgetId: ruleWidgetId, template: ruleTemplate }
+            };
 
     const validationError = validateRule(nextRule);
     if (validationError) {
@@ -904,7 +952,11 @@ const App = () => {
     ruleMode,
     rulePattern,
     ruleTemplate,
-    ruleWidgetId
+    ruleValueSource,
+    ruleWidgetId,
+    ruleMinSeconds,
+    rulePrecision,
+    ruleUnit
   ]);
 
   const handleToggleRule = useCallback(
@@ -1394,7 +1446,7 @@ const App = () => {
 
     if (trimmed.toLowerCase() === "reset") {
       const resetPlan = defaultPlanMemo;
-      setRulesStore(emptyRules);
+      setRulesStore(defaultRules);
       setLlmError(null);
       setPlannerNote("Resetting plan...");
       setDraftWidgetSpec({
@@ -1403,7 +1455,7 @@ const App = () => {
         widgets: []
       });
       if (overlayAPI && typeof overlayAPI.saveRules === "function") {
-        await overlayAPI.saveRules(emptyRules);
+        await overlayAPI.saveRules(defaultRules);
       }
       const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
       const resetSpec = overlayPlanToWidgetSpec(resetPlan, profileId);
@@ -1966,29 +2018,67 @@ const App = () => {
                         >
                           <option value="setTextWidget">Set Text Widget</option>
                           <option value="incrementCounter">Increment Counter</option>
+                          <option value="trackRate">Track Rate (per hour)</option>
                         </select>
                         <select value={ruleWidgetId} onChange={(e) => setRuleWidgetId(e.target.value)}>
                           <option value="" disabled>
                             Choose widget
                           </option>
-                          {(ruleActionType === "setTextWidget" ? textWidgets : counterWidgets).map((widget) => (
-                            <option key={widget.id} value={widget.id}>
-                              {widget.title ? `${widget.title} (${widget.id})` : widget.id}
-                            </option>
-                          ))}
+                          {(ruleActionType === "incrementCounter" ? counterWidgets : textWidgets).map(
+                            (widget) => (
+                              <option key={widget.id} value={widget.id}>
+                                {widget.title ? `${widget.title} (${widget.id})` : widget.id}
+                              </option>
+                            )
+                          )}
                         </select>
-                        {ruleActionType === "setTextWidget" ? (
+                        {ruleActionType === "setTextWidget" || ruleActionType === "trackRate" ? (
                           <input
                             value={ruleTemplate}
                             onChange={(e) => setRuleTemplate(e.target.value)}
-                            placeholder="Template (use ${text}, ${match0}, ${g1}...)"
+                            placeholder={
+                              ruleActionType === "trackRate"
+                                ? "Template (use ${rate}, ${unit}, ${value})"
+                                : "Template (use ${text}, ${match0}, ${g1}...)"
+                            }
                           />
-                        ) : (
+                        ) : ruleActionType === "incrementCounter" ? (
                           <input
                             type="number"
                             value={ruleAmount}
                             onChange={(e) => setRuleAmount(Number(e.target.value))}
                           />
+                        ) : null}
+                        {ruleActionType === "trackRate" && (
+                          <>
+                            <select
+                              value={ruleValueSource}
+                              onChange={(e) => setRuleValueSource(e.target.value as "match0" | "g1")}
+                            >
+                              <option value="g1">Use group 1</option>
+                              <option value="match0">Use full match</option>
+                            </select>
+                            <input
+                              value={ruleUnit}
+                              onChange={(e) => setRuleUnit(e.target.value)}
+                              placeholder="Unit (e.g., %)"
+                            />
+                            <input
+                              type="number"
+                              min={0}
+                              max={6}
+                              value={rulePrecision}
+                              onChange={(e) => setRulePrecision(Number(e.target.value))}
+                              placeholder="Precision"
+                            />
+                            <input
+                              type="number"
+                              min={1}
+                              value={ruleMinSeconds}
+                              onChange={(e) => setRuleMinSeconds(Number(e.target.value))}
+                              placeholder="Min seconds between samples"
+                            />
+                          </>
                         )}
                         <button type="button" onClick={handleAddRule}>
                           Add Rule
