@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, screen, globalShortcut, nativeImage } from "electron";
+import { app, BrowserWindow, ipcMain, screen, nativeImage } from "electron";
 import { join } from "path";
 import {
   addMemoryEntry,
@@ -33,7 +33,6 @@ import {
   CaptureRoi,
   CaptureSnapshotResult,
   CaptureTarget,
-  DisplayInfo,
   EventLog,
   MemoryEntry,
   MemoryStore,
@@ -56,7 +55,6 @@ let overlayWindow: BrowserWindow | null = null;
 let cachedSettings: OverlaySettings | null = null;
 let profileStore: ProfileStore | null = null;
 
-const escapeShortcut = "Control+Shift+O";
 const OCR_MAX_WIDTH = 1920;
 const OCR_MAX_HEIGHT = 1080;
 const OCR_UPSCALE_TARGET_LONG_SIDE = 1400;
@@ -183,14 +181,6 @@ type WindowInfo = {
   bounds: WindowBounds;
 };
 
-const getDisplays = (): DisplayInfo[] => {
-  return screen.getAllDisplays().map((display, index) => ({
-    id: display.id,
-    label: `Display ${index + 1} (${display.size.width}x${display.size.height})`,
-    bounds: display.bounds
-  }));
-};
-
 const resolveBounds = (settings: OverlaySettings): Electron.Rectangle => {
   if (settings.bounds) {
     return settings.bounds;
@@ -202,31 +192,6 @@ const resolveBounds = (settings: OverlaySettings): Electron.Rectangle => {
     width: Math.round(primary.bounds.width * 0.6),
     height: Math.round(primary.bounds.height * 0.6)
   };
-};
-
-const applyClickThrough = (window: BrowserWindow, enabled: boolean) => {
-  window.setIgnoreMouseEvents(enabled, { forward: true });
-};
-
-const positionOnDisplay = (window: BrowserWindow, displayId: number | null) => {
-  const displays = screen.getAllDisplays();
-  const target = displays.find((display) => display.id === displayId) ?? screen.getPrimaryDisplay();
-  const bounds = window.getBounds();
-  const nextBounds = {
-    x: target.bounds.x + 40,
-    y: target.bounds.y + 40,
-    width: bounds.width,
-    height: bounds.height
-  };
-  window.setBounds(nextBounds);
-};
-
-const rectsIntersect = (a: Electron.Rectangle, b: Electron.Rectangle) => {
-  const ax2 = a.x + a.width;
-  const ay2 = a.y + a.height;
-  const bx2 = b.x + b.width;
-  const by2 = b.y + b.height;
-  return a.x < bx2 && ax2 > b.x && a.y < by2 && ay2 > b.y;
 };
 
 const formatError = (error: unknown) => {
@@ -740,12 +705,13 @@ const createOverlayWindow = async () => {
     height: bounds.height,
     x: bounds.x,
     y: bounds.y,
-    transparent: true,
-    frame: false,
-    alwaysOnTop: true,
+    transparent: false,
+    frame: true,
+    alwaysOnTop: false,
     resizable: true,
-    hasShadow: false,
-    skipTaskbar: true,
+    hasShadow: true,
+    skipTaskbar: false,
+    backgroundColor: "#0a0c10",
     webPreferences: {
       contextIsolation: true,
       preload: join(__dirname, "..", "preload", "preload.js"),
@@ -754,22 +720,8 @@ const createOverlayWindow = async () => {
     }
   });
 
-  overlayWindow.setAlwaysOnTop(true, "screen-saver");
-  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  overlayWindow.setOpacity(initialSettings.opacity);
-  applyClickThrough(overlayWindow, initialSettings.clickThrough);
-
-  if (initialSettings.displayId !== null) {
-    const displays = screen.getAllDisplays();
-    const target =
-      displays.find((display) => display.id === initialSettings.displayId) ?? screen.getPrimaryDisplay();
-    const currentBounds = overlayWindow.getBounds();
-    const hasSavedBounds = Boolean(initialSettings.bounds);
-    const alreadyOnTargetDisplay = rectsIntersect(currentBounds, target.bounds);
-    if (!hasSavedBounds || !alreadyOnTargetDisplay) {
-      positionOnDisplay(overlayWindow, initialSettings.displayId);
-    }
-  }
+  overlayWindow.setAlwaysOnTop(false);
+  overlayWindow.setOpacity(1);
 
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
   if (devServerUrl) {
@@ -809,16 +761,6 @@ const createOverlayWindow = async () => {
     persistBounds().catch(() => undefined);
   });
 
-  globalShortcut.register(escapeShortcut, () => {
-    if (!overlayWindow || !cachedSettings) {
-      return;
-    }
-    cachedSettings.clickThrough = false;
-    applyClickThrough(overlayWindow, false);
-    overlayWindow.focus();
-    overlayWindow.webContents.send("app:escape-hatch");
-    saveSettings(cachedSettings).catch(() => undefined);
-  });
 };
 
 const registerIpc = () => {
@@ -831,19 +773,7 @@ const registerIpc = () => {
     cachedSettings = settings;
     await saveSettings(settings);
     if (overlayWindow) {
-      overlayWindow.setOpacity(settings.opacity);
-      applyClickThrough(overlayWindow, settings.clickThrough);
-    }
-  });
-
-  ipcMain.handle("app:get-displays", async () => getDisplays());
-
-  ipcMain.handle("app:set-display", async (_event, displayId: number) => {
-    cachedSettings = cachedSettings ?? (await loadSettings());
-    cachedSettings.displayId = displayId;
-    await saveSettings(cachedSettings);
-    if (overlayWindow) {
-      positionOnDisplay(overlayWindow, displayId);
+      overlayWindow.setOpacity(1);
     }
   });
 
@@ -1135,6 +1065,5 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
-  globalShortcut.unregister(escapeShortcut);
   shutdownOcrWorker().catch(() => undefined);
 });

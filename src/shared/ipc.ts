@@ -16,12 +16,6 @@ export type OverlaySettings = {
   llm: LlmSettings;
 };
 
-export type DisplayInfo = {
-  id: number;
-  label: string;
-  bounds: { x: number; y: number; width: number; height: number };
-};
-
 export type OverlayPlan = {
   version: "1.0";
   widgets: OverlayWidget[];
@@ -285,8 +279,6 @@ export type PlannerResult = {
 export type OverlayAPI = {
   getSettings: () => Promise<OverlaySettings>;
   saveSettings: (settings: OverlaySettings) => Promise<void>;
-  getDisplays: () => Promise<DisplayInfo[]>;
-  setDisplay: (displayId: number) => Promise<void>;
   loadPlan: () => Promise<PlanLoadResult>;
   savePlan: (plan: OverlayPlan | WidgetSpec, meta?: PlanSaveMeta) => Promise<WidgetSpec>;
   undoPlan: () => Promise<WidgetSpec>;
@@ -305,7 +297,6 @@ export type OverlayAPI = {
   captureAndProcess: (target: CaptureTarget | null) => Promise<OcrResult | null>;
   captureSnapshot: (target: CaptureTarget) => Promise<CaptureSnapshotResult>;
   stopCapture: () => void;
-  onEscapeHatch: (callback: () => void) => () => void;
   // Profile management
   listProfiles: () => Promise<Profile[]>;
   getActiveProfile: () => Promise<Profile>;
