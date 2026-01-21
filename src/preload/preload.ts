@@ -34,8 +34,6 @@ const formatError = (error: unknown) => {
 const api: OverlayAPI = {
   getSettings: () => ipcRenderer.invoke("app:get-settings"),
   saveSettings: (settings: OverlaySettings) => ipcRenderer.invoke("app:save-settings", settings),
-  getDisplays: () => ipcRenderer.invoke("app:get-displays"),
-  setDisplay: (displayId: number) => ipcRenderer.invoke("app:set-display", displayId),
   loadPlan: () => ipcRenderer.invoke("plan:load"),
   savePlan: (plan: OverlayPlan | WidgetSpec, meta?: PlanSaveMeta) =>
     ipcRenderer.invoke("plan:save", plan, meta),
@@ -78,11 +76,6 @@ const api: OverlayAPI = {
   },
   stopCapture: () => {
     // Main-process capture is stateless; nothing to stop.
-  },
-  onEscapeHatch: (callback: () => void) => {
-    const listener = () => callback();
-    ipcRenderer.on("app:escape-hatch", listener);
-    return () => ipcRenderer.removeListener("app:escape-hatch", listener);
   },
   // Profile management
   listProfiles: () => ipcRenderer.invoke("profile:list"),

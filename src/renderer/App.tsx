@@ -5,7 +5,6 @@ import {
   CaptureSource,
   CaptureSourceType,
   CounterWidget,
-  DisplayInfo,
   EventLog,
   EventLogEntry,
   LlmProvider,
@@ -208,7 +207,6 @@ type InspectorTab = "widget" | "events" | "rules" | "memory" | "capture" | "prof
 
 const App = () => {
   const [settings, setSettings] = useState<OverlaySettings | null>(null);
-  const [displays, setDisplays] = useState<DisplayInfo[]>([]);
   const [plan, setPlan] = useState<OverlayPlan | null>(null);
   const [lastValidPlan, setLastValidPlan] = useState<OverlayPlan | null>(null);
   const [widgetSpecPlan, setWidgetSpecPlan] = useState<WidgetSpec | null>(null);
@@ -292,9 +290,8 @@ const App = () => {
       }
 
       setPlanLoadStatus("loading");
-      const [settingsResult, displaysResult, planResult] = await Promise.allSettled([
+      const [settingsResult, planResult] = await Promise.allSettled([
         overlayAPI.getSettings(),
-        overlayAPI.getDisplays(),
         overlayAPI.loadPlan()
       ]);
 
@@ -305,12 +302,6 @@ const App = () => {
         setPlannerNote(
           `Failed to load settings. ${settingsResult.reason instanceof Error ? settingsResult.reason.message : ""}`.trim()
         );
-      }
-
-      if (displaysResult.status === "fulfilled") {
-        setDisplays(displaysResult.value);
-      } else {
-        setDisplays([]);
       }
 
       if (planResult.status === "fulfilled") {
@@ -451,16 +442,6 @@ const App = () => {
     if (!overlayAPI) {
       return;
     }
-    return overlayAPI.onEscapeHatch(() => {
-      setPlannerNote("Escape hatch used: overlay unlocked.");
-      setSettings((prev) => (prev ? { ...prev, clickThrough: false } : prev));
-    });
-  }, [overlayAPI]);
-
-  useEffect(() => {
-    if (!overlayAPI) {
-      return;
-    }
     loadCaptureSources().catch(() => undefined);
   }, [overlayAPI, loadCaptureSources]);
 
@@ -562,30 +543,6 @@ const App = () => {
       setPlanError(null);
     } catch (error: unknown) {
       setPlanError(error instanceof Error ? error.message : "Rollback failed.");
-    }
-  };
-
-  const handleOpacityChange = (value: number) => {
-    if (!settings) {
-      return;
-    }
-    saveSettings({ ...settings, opacity: value });
-  };
-
-  const handleClickThroughToggle = () => {
-    if (!settings) {
-      return;
-    }
-    saveSettings({ ...settings, clickThrough: !settings.clickThrough });
-  };
-
-  const handleDisplayChange = async (event: React.ChangeEvent<HTMLSelectElement>) => {
-    const displayId = Number(event.target.value);
-    if (overlayAPI) {
-      await overlayAPI.setDisplay(displayId);
-    }
-    if (settings) {
-      saveSettings({ ...settings, displayId });
     }
   };
 
@@ -1707,33 +1664,6 @@ const App = () => {
       <header className="top-bar">
         <div className="runtime-controls">
           <div className="control-group">
-            <span className="label">Opacity</span>
-            <input
-              type="range"
-              min={0.2}
-              max={1}
-              step={0.02}
-              value={settings?.opacity ?? 0.92}
-              onChange={(event) => handleOpacityChange(Number(event.target.value))}
-            />
-          </div>
-          <button type="button" onClick={handleClickThroughToggle}>
-            {settings?.clickThrough ? "Unlock (Interactive)" : "Lock (Click-through)"}
-          </button>
-          <div className="control-group">
-            <span className="label">Display</span>
-            <select value={settings?.displayId ?? ""} onChange={handleDisplayChange}>
-              <option value="" disabled>
-                Choose display
-              </option>
-              {displays.map((display) => (
-                <option key={display.id} value={display.id}>
-                  {display.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="control-group">
             <span className="label">Capture</span>
             <button
               type="button"
@@ -1773,9 +1703,6 @@ const App = () => {
                 Compose
               </button>
             </div>
-          </div>
-          <div className="escape-hatch">
-            Escape Hatch: <strong>Ctrl + Shift + O</strong>
           </div>
         </div>
       </header>
