@@ -366,10 +366,8 @@ const App = () => {
           setPlan(overlayPlan);
           setLastValidPlan(overlayPlan);
         } else {
-          const fallbackSpec = buildFallbackWidgetSpec(
-            PROFILE_ID,
-            "No plan loaded. Created a minimal WidgetSpec plan."
-          );
+          const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
+          const fallbackSpec = overlayPlanToWidgetSpec(defaultPlanMemo, profileId);
           const overlayPlan = widgetSpecToOverlayPlan(fallbackSpec);
           setWidgetSpecPlan(fallbackSpec);
           setLastKnownGoodWidgetSpec(fallbackSpec);
@@ -380,10 +378,8 @@ const App = () => {
           await overlayAPI.savePlan(fallbackSpec, { reason: "bootstrap", actor: "system" });
         }
       } else {
-        const fallbackSpec = buildFallbackWidgetSpec(
-          PROFILE_ID,
-          "Failed to load plan. Created a minimal WidgetSpec plan."
-        );
+        const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
+        const fallbackSpec = overlayPlanToWidgetSpec(defaultPlanMemo, profileId);
         const overlayPlan = widgetSpecToOverlayPlan(fallbackSpec);
         setWidgetSpecPlan(fallbackSpec);
         setLastKnownGoodWidgetSpec(fallbackSpec);
