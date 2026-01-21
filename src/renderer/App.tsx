@@ -59,7 +59,36 @@ const OCR_PREVIEW_LIMIT = 140;
 
 const emptyEventLog: EventLog = { version: "1.0", entries: [] };
 const emptyMemory: MemoryStore = { version: "1.0", entries: [] };
-const emptyRules: RulesStore = { version: "1.0", rules: [] };
+const defaultRules: RulesStore = {
+  version: "1.0",
+  rules: [
+    {
+      id: "rule-exp-current",
+      enabled: true,
+      mode: "regex",
+      pattern: "EXP\\s*[:=]?\\s*(\\d+(?:[.,]\\d+)?)",
+      action: {
+        type: "setTextWidget",
+        widgetId: "text-exp-current",
+        template: "EXP ${g1}"
+      }
+    },
+    {
+      id: "rule-exp-rate",
+      enabled: true,
+      mode: "regex",
+      pattern: "EXP\\s*[:=]?\\s*(\\d+(?:[.,]\\d+)?)",
+      action: {
+        type: "trackRate",
+        widgetId: "text-exp-rate",
+        template: "EXP/h ${rate}",
+        valueSource: "g1",
+        precision: 2,
+        minSeconds: 60
+      }
+    }
+  ]
+};
 const PROFILE_ID = "default";
 
 const llmDefaults: Record<LlmProvider, { baseUrl: string; model: string; apiKey?: string }> = {
@@ -220,7 +249,7 @@ const App = () => {
   const [memoryStore, setMemoryStore] = useState<MemoryStore>(emptyMemory);
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [memoryInput, setMemoryInput] = useState("");
-  const [rulesStore, setRulesStore] = useState<RulesStore>(emptyRules);
+  const [rulesStore, setRulesStore] = useState<RulesStore>(defaultRules);
   const [rulesError, setRulesError] = useState<string | null>(null);
   const [llmError, setLlmError] = useState<string | null>(null);
   const [ruleMode, setRuleMode] = useState<Rule["mode"]>("includes");
@@ -405,11 +434,11 @@ const App = () => {
           setRulesStore(loadedRules);
           setRulesError(null);
         } catch (error: unknown) {
-          setRulesStore(emptyRules);
+          setRulesStore(defaultRules);
           setRulesError(error instanceof Error ? error.message : "Failed to load rules.");
         }
       } else {
-        setRulesStore(emptyRules);
+        setRulesStore(defaultRules);
         setRulesError("Rules API not available. Restart Electron to load updated IPC handlers.");
       }
     };
@@ -1421,7 +1450,7 @@ const App = () => {
 
     if (trimmed.toLowerCase() === "reset") {
       const resetPlan = defaultPlanMemo;
-      setRulesStore(emptyRules);
+      setRulesStore(defaultRules);
       setLlmError(null);
       setPlannerNote("Resetting plan...");
       setDraftWidgetSpec({
@@ -1430,7 +1459,7 @@ const App = () => {
         widgets: []
       });
       if (overlayAPI && typeof overlayAPI.saveRules === "function") {
-        await overlayAPI.saveRules(emptyRules);
+        await overlayAPI.saveRules(defaultRules);
       }
       const profileId = widgetSpecPlan?.profileId ?? PROFILE_ID;
       const resetSpec = overlayPlanToWidgetSpec(resetPlan, profileId);

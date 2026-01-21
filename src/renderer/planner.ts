@@ -64,6 +64,25 @@ export const defaultPlan = (): OverlayPlan =>
           ]
         }
       ]
+    },
+    {
+      id: "panel-exp",
+      type: "panel",
+      title: "EXP Tracker",
+      children: [
+        {
+          id: "text-exp-current",
+          type: "text",
+          title: "EXP (Current)",
+          text: "Waiting for OCR..."
+        },
+        {
+          id: "text-exp-rate",
+          type: "text",
+          title: "EXP/h",
+          text: "Waiting for samples..."
+        }
+      ]
     }
   ]);
 
