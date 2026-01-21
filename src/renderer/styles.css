@@ -25,9 +25,9 @@ body {
   justify-content: space-between;
   align-items: center;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  background: linear-gradient(135deg, #14161c 0%, #1c202a 100%);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.28);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: linear-gradient(135deg, #0f1218 0%, #151a22 100%);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.32);
   user-select: none;
 }
 
@@ -56,9 +56,9 @@ body {
   gap: 4px;
   padding: 4px;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  background: #0f1218;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0c0f15;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
 }
 
 .mode-buttons button {
